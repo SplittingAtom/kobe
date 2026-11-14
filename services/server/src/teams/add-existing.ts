@@ -17,6 +17,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { normalizeEmail } from "../invitations/site-invites.js";
 import { SITE_ADMIN_VIA } from "./members.js";
+import { reopenRetentionInTx } from "../offboarding/reopen.js";
 
 /** Most users one Add takes (the Site console picker sends a handful). */
 export const ADD_MEMBERS_MAX = 50;
@@ -107,6 +108,8 @@ async function addInTx(
     .onConflictDoNothing()
     .returning({ userId: teamMembers.userId });
   const added = new Set(inserted.map((r) => r.userId));
+  // Returning members' old 30-day records are reopened (KOBE-386 review H1).
+  await reopenRetentionInTx(tx, teamId, [...added]);
   const existing = userIds.find((u) => !added.has(u));
   if (existing !== undefined) throw new Refused("already_member", existing);
   // Their pending invitations to this team are moot now (review L3): revoked, audited.

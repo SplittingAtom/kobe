@@ -398,6 +398,92 @@ describe("version cap (ac-4)", () => {
     }
   });
 
+  it("a Workspace-wide hold keeps portable versions of that Workspace's members only (KOBE-386 Q2)", async () => {
+    await settings({
+      scope_limits: { user: 50, portable: 50, team: 50, site: 50 },
+      version_cap: 5,
+    });
+    const hold =
+      (
+        await h.admin.query<{ id: string }>(
+          `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, NULL, 'matter B', $2) RETURNING id`,
+          [teamB, ids.site],
+        )
+      ).rows[0]?.id ?? "";
+    await h.admin.query(
+      `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
+      [hold, ids.site2],
+    );
+    const sevenVersions = async (who: TestBrowser) => {
+      const id = detail((await save(who, "portable", unique("pref"))).json).id;
+      for (let n = 0; n < 6; n += 1)
+        expect(
+          (
+            await who.patch(item("portable", id), {
+              expected_version: 1 + n,
+              statement: unique(`edit ${n}`),
+            })
+          ).status,
+        ).toBe(200);
+      return detail((await who.get(item("portable", id))).json).versions.map((v) => v.version);
+    };
+    try {
+      // The Site steward is a member of the held Workspace B; the member works in A only.
+      expect(await sevenVersions(as.siteSteward)).toEqual([7, 6, 5, 4, 3, 2, 1]);
+      expect(await sevenVersions(as.member)).toEqual([7, 6, 5, 4, 3]);
+    } finally {
+      await h.admin.query(
+        `UPDATE legal_holds SET release_requested_by = $2, release_requested_at = now(), release_reason = 'done' WHERE id = $1`,
+        [hold, ids.site],
+      );
+      await h.admin.query(
+        `UPDATE legal_holds SET status = 'released', released_by = $2 WHERE id = $1`,
+        [hold, ids.site2],
+      );
+    }
+  });
+
+  it("a Site-wide hold keeps every portable version (KOBE-386 N1)", async () => {
+    await settings({
+      scope_limits: { user: 50, portable: 50, team: 50, site: 50 },
+      version_cap: 5,
+    });
+    const hold =
+      (
+        await h.admin.query<{ id: string }>(
+          `INSERT INTO site_legal_holds (reason, placed_by) VALUES ('Site matter', $1) RETURNING id`,
+          [ids.site],
+        )
+      ).rows[0]?.id ?? "";
+    await h.admin.query(
+      `UPDATE site_legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
+      [hold, ids.site2],
+    );
+    try {
+      const id = detail((await save(as.member, "portable", unique("pref"))).json).id;
+      for (let n = 0; n < 6; n += 1)
+        expect(
+          (
+            await as.member.patch(item("portable", id), {
+              expected_version: 1 + n,
+              statement: unique(`edit ${n}`),
+            })
+          ).status,
+        ).toBe(200);
+      const d = detail((await as.member.get(item("portable", id))).json);
+      expect(d.versions.map((v) => v.version)).toEqual([7, 6, 5, 4, 3, 2, 1]);
+    } finally {
+      await h.admin.query(
+        `UPDATE site_legal_holds SET release_requested_by = $2, release_requested_at = now(), release_reason = 'done' WHERE id = $1`,
+        [hold, ids.site],
+      );
+      await h.admin.query(
+        `UPDATE site_legal_holds SET status = 'released', released_by = $2 WHERE id = $1`,
+        [hold, ids.site2],
+      );
+    }
+  });
+
   it("keeps every version while a legal hold covers the item", async () => {
     const id = detail((await save(as.admin, "team", unique("held"))).json).id;
     const hold =

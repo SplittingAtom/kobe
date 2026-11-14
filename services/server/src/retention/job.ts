@@ -25,6 +25,17 @@ import { NO_ORPHANS, sweepOrphanObjects, type OrphanCounts } from "./orphans.js"
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
 import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
 import { NO_MEMORY_PURGE, purgeMemory, type MemoryPurgeCounts } from "./memory.js";
+import {
+  NO_SEMANTIC_PURGE,
+  purgeSemanticMemory,
+  type SemanticPurgeCounts,
+} from "./semantic-memory.js";
+import {
+  NO_SITE_PURGE,
+  purgeSiteSemanticMemory,
+  type SitePurgeCounts,
+} from "./site-semantic-memory.js";
+import { readMemorySiteSettings } from "../memory/site-settings.js";
 import { purgeReleasedFeedbackHistory, type FeedbackHistoryCounts } from "./feedback-history.js";
 import { NO_EVAL_CASE_PURGE, purgeEvalCases, type EvalCasePurgeCounts } from "./eval-cases.js";
 import {
@@ -64,7 +75,10 @@ import {
  *  8. purge shared eval cases past the team's window, and their copies kept for a released hold
  *     (KOBE-276);
  *  9. purge Workbench drafts unchanged for longer than the team's window, and the copies kept
- *     for a released hold (KOBE-320).
+ *     for a released hold (KOBE-320);
+ * 10. purge semantic memories past the team's window and drop evidence of purged conversations
+ *     (KOBE-386, SM28); once per new pass, before the teams, Site and portable memories past the
+ *     Site window.
  * Every step skips data under legal hold and is audited with counts only (system actor).
  *
  * Every server replica runs the timer; a session-level advisory lock on a dedicated connection
@@ -89,6 +103,8 @@ export interface TeamPassResult {
   readonly trash: PurgeCounts;
   readonly retention: PurgeCounts;
   readonly memory: MemoryPurgeCounts;
+  /** Semantic memories past the window and evidence of purged conversations (KOBE-386, SM28). */
+  readonly semanticMemory: SemanticPurgeCounts;
   readonly compacted: CompactionCounts;
   /** Project history past the workspace's rule or the hard cap (KOBE-579, GV3). */
   readonly projectHistory: HistoryPruneCounts;
@@ -119,6 +135,11 @@ export interface PassResult {
   readonly teams: readonly TeamPassResult[];
   /** Every team was visited (false: stopped early; the next check resumes). */
   readonly complete: boolean;
+  /**
+   * Site and portable semantic memories past the Site window (KOBE-386), once per new pass (a
+   * resumed pass leaves them to the next one).
+   */
+  readonly siteMemory?: { readonly site: SitePurgeCounts; readonly portable: SitePurgeCounts };
 }
 
 export interface PassDeps {
@@ -267,6 +288,13 @@ async function teamPass(
   const memory = stop()
     ? NO_MEMORY_PURGE
     : await step("memory", NO_MEMORY_PURGE, () => purgeMemoryPastWindow(deps, teamId, stop));
+  const semanticMemory = stop()
+    ? NO_SEMANTIC_PURGE
+    : await step("semantic_memory", NO_SEMANTIC_PURGE, async () => {
+        const days = await windowDays(db, teamId);
+        const cutoff = days === null ? null : new Date(Date.now() - days * 86_400_000);
+        return purgeSemanticMemory(db, teamId, cutoff, { stop });
+      });
   const compacted = stop()
     ? { runs: 0, events: 0 }
     : await step("compaction", { runs: 0, events: 0 }, () =>
@@ -359,6 +387,7 @@ async function teamPass(
     trash,
     retention,
     memory,
+    semanticMemory,
     compacted,
     projectHistory,
     blobs,
@@ -385,6 +414,20 @@ export interface PassOptions {
   readonly onTeamDone?: (teamId: string) => Promise<void>;
 }
 
+/** Site and portable semantic memory past the Site window (a failure is logged, never fatal). */
+async function sitePass(
+  deps: PassDeps,
+  stop: () => boolean,
+): Promise<NonNullable<PassResult["siteMemory"]>> {
+  try {
+    const { retention_days } = await readMemorySiteSettings(deps.db);
+    return await purgeSiteSemanticMemory(deps.db, retention_days, { stop });
+  } catch (err) {
+    deps.logger.error({ err, step: "site_memory" }, "retention step failed");
+    return { site: NO_SITE_PURGE, portable: NO_SITE_PURGE };
+  }
+}
+
 /** One pass over the teams (the caller holds the job lock). Also called by tests. */
 export async function runRetentionPass(
   deps: PassDeps,
@@ -398,17 +441,19 @@ export async function runRetentionPass(
     .from(teams)
     .where(after === null ? undefined : gt(teams.id, after))
     .orderBy(asc(teams.id));
+  const siteMemory = after === null && !stop() ? await sitePass(deps, stop) : undefined;
+  const site = siteMemory ? { siteMemory } : {};
   const results: TeamPassResult[] = [];
   for (const { id } of all) {
     if (stop()) {
       deps.logger.warn("retention pass stopped early; the next check resumes it");
-      return { teams: results, complete: false };
+      return { teams: results, complete: false, ...site };
     }
     results.push(await teamPass(deps, id, stop));
-    if (stop()) return { teams: results, complete: false };
+    if (stop()) return { teams: results, complete: false, ...site };
     await options.onTeamDone?.(id);
   }
-  return { teams: results, complete: true };
+  return { teams: results, complete: true, ...site };
 }
 
 /** Whether a new pass is due at `now` given the last completed pass (see the module comment). */

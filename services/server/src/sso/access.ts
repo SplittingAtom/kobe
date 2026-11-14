@@ -27,6 +27,7 @@ import {
   type MembershipError,
 } from "../teams/members.js";
 import { desiredTeamRoles, normalizeIdpValues, planTeam, type TeamRow } from "./access-plan.js";
+import { reopenRetentionInTx } from "../offboarding/reopen.js";
 
 /**
  * The access-mapping engine (KOBE-627, spec sso-oidc-scim §7, SSO2/SSO6/SSO10), shared by SSO
@@ -189,6 +190,8 @@ async function reconcileTeam(
         .returning({ role: teamMembers.role });
       // A row appeared since the lock (a concurrent accept): it stands; the next apply sees it.
       if (added.length === 0) return { change: null, role: null };
+      // A returning member's old 30-day record is reopened (KOBE-386 review H1).
+      await reopenRetentionInTx(tx, p.teamId, [p.userId]);
       await recordAudit(tx, {
         action: "identity.member.added",
         teamId: p.teamId,

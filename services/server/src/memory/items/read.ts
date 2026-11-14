@@ -16,6 +16,7 @@ import {
   type DetailView,
   type ItemRow,
 } from "./rows.js";
+import { staleSql } from "./stale.js";
 import { assertEnabled, type MemoryWho } from "./who.js";
 
 /** Trigram similarity a search match needs when the words don't match (SM10 search). */
@@ -71,6 +72,11 @@ export function listItems(
       q.kind ? sql`i.kind = ${q.kind}` : undefined,
       q.pinned !== undefined ? sql`i.pinned = ${q.pinned}` : undefined,
       policy !== undefined ? sql`${loc.policy} = ${policy}` : undefined,
+      q.stale === undefined
+        ? undefined
+        : q.stale
+          ? staleSql(loc, op.settings.stale_after_days)
+          : sql`NOT ${staleSql(loc, op.settings.stale_after_days)}`,
       q.q
         ? sql`(v.statement_tsv @@ websearch_to_tsquery('english', ${q.q})
                OR similarity(v.statement, ${q.q}) >= ${SEARCH_SIMILARITY})`
@@ -94,7 +100,7 @@ export function listItems(
         : {};
     return {
       scope: q.scope,
-      items: page.map((r) => itemToWire(loc, who, r)),
+      items: page.map((r) => itemToWire(loc, who, r, op.settings.stale_after_days)),
       next_cursor:
         rows.length > q.limit && last ? encodeCursor({ us: last.stamp, id: last.id }) : null,
       usage: { count: await activeCount(tx, loc), max: scopeLimit(op.settings, loc), ...usage },
@@ -123,6 +129,6 @@ export function getItem(
     const row = await readItem(op.tx, op.loc, id);
     if (!row) throw notFound();
     assertEnabled(op.memory, scope, row.policy);
-    return detailOf(op.tx, op.loc, who, row, view);
+    return detailOf(op.tx, op.loc, who, row, op.settings.stale_after_days, view);
   });
 }

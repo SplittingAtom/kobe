@@ -10,6 +10,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
 import { memoryRecorder, purgeMemoryBatchInTx } from "../retention/memory.js";
+import { purgeDepartedSemanticInTx } from "../retention/semantic-memory.js";
 import { EVAL_CASE_BATCH, purgeDepartedCasesInTx } from "../retention/eval-cases.js";
 import { deleteBounded } from "../retention/bounded-delete.js";
 import { withTeamRecovering } from "../retention/recovering.js";
@@ -177,6 +178,24 @@ async function deleteBlobs(
 }
 
 /**
+ * Step 4a: the member's personal semantic memories in the Workspace (v1.3 SM28, KOBE-386): items,
+ * versions and run records, 30 days after they left. Workspace memories they wrote stay ("former
+ * member"); portable memories follow the person, not the Workspace. The guard above is the hold
+ * check; the statement re-checks the hold and keeps everything if the person is back.
+ */
+async function deleteSemanticMemory(
+  ctx: OffboardingContext,
+  target: Departed,
+): Promise<PurgeOutcome | "ok"> {
+  return withTeam(ctx.db, target.teamId, async (tx) => {
+    const state = await guard(tx, target);
+    if (state !== "ok") return state;
+    await purgeDepartedSemanticInTx(tx, target.teamId, target.userId);
+    return "ok" as const;
+  });
+}
+
+/**
  * Step 4: the member's personal memory (D24, KOBE-188): files, versions and their objects. Project
  * memory follows the project and stays. The guard above is the hold check; the batch re-checks
  * `memory_legal_hold_covers` under the same lock.
@@ -270,6 +289,7 @@ export async function purgeDeparted(
     () => deleteVolume(ctx, team, target, counts),
     () => deleteFiles(ctx, target, counts),
     () => deleteBlobs(ctx, target, counts),
+    () => deleteSemanticMemory(ctx, target),
     () => deleteMemory(ctx, target),
     () => deleteEvalCases(ctx, target),
     () => finish(ctx, target, counts),
@@ -310,11 +330,49 @@ export async function departedNotOffboarded(
     const rows = await withTeam(ctx.db, team.id, (tx) =>
       tx.execute<{ user_id: string }>(sql`
         SELECT s.user_id FROM sandboxes s
-         WHERE s.team_id = ${team.id} AND s.state <> 'destroyed'
+         WHERE s.team_id = ${team.id}
+           AND (s.state <> 'destroyed'
+                -- A reopened record (KOBE-386 review H1) whose person left again unnoticed.
+                OR (s.retain_until IS NULL
+                    AND (s.pvc IS NOT NULL
+                         OR EXISTS (SELECT 1 FROM workspace_sync w
+                                     WHERE w.team_id = s.team_id AND w.user_id = s.user_id)
+                         OR EXISTS (SELECT 1 FROM semantic_memory_items i
+                                     WHERE i.team_id = s.team_id AND i.scope = 'user'
+                                       AND i.owner_user_id = s.user_id))))
            AND (NOT EXISTS (SELECT 1 FROM team_members m
                              WHERE m.team_id = s.team_id AND m.user_id = s.user_id)
                 OR EXISTS (SELECT 1 FROM users u
                             WHERE u.id = s.user_id AND u.deactivated_at IS NOT NULL))
+         LIMIT ${limit - found.length}`),
+    );
+    found.push(...rows.rows.map((r) => ({ teamId: team.id, userId: r.user_id })));
+  }
+  return found;
+}
+
+/**
+ * Departed owners of personal semantic memories with no sandbox record at all (KOBE-386): they
+ * never had a sandbox there. The sweep offboards them (`offboardSandbox` records the window), so
+ * their memories go 30 days later. A reopened record is caught by `departedNotOffboarded`.
+ */
+export async function departedMemoryOwners(
+  ctx: OffboardingContext,
+  limit: number,
+): Promise<Departed[]> {
+  const all = await ctx.db.select({ id: teams.id }).from(teams);
+  const found: Departed[] = [];
+  for (const team of all) {
+    if (found.length >= limit) break;
+    const rows = await withTeam(ctx.db, team.id, (tx) =>
+      tx.execute<{ user_id: string }>(sql`
+        SELECT DISTINCT i.owner_user_id AS user_id FROM semantic_memory_items i
+         WHERE i.team_id = ${team.id} AND i.scope = 'user'
+           AND NOT EXISTS (SELECT 1 FROM team_members m JOIN users u ON u.id = m.user_id
+                            WHERE m.team_id = i.team_id AND m.user_id = i.owner_user_id
+                              AND u.deactivated_at IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM sandboxes s
+                            WHERE s.team_id = i.team_id AND s.user_id = i.owner_user_id)
          LIMIT ${limit - found.length}`),
     );
     found.push(...rows.rows.map((r) => ({ teamId: team.id, userId: r.user_id })));

@@ -270,6 +270,16 @@ describe("item API requests", () => {
       true,
     );
   });
+
+  it("filters on stale and carries an optional stale flag on items (KOBE-386)", () => {
+    expect(semanticMemoryListQuerySchema.parse({ scope: "team", stale: "true" }).stale).toBe(true);
+    expect(semanticMemoryListQuerySchema.parse({ scope: "team", stale: "false" }).stale).toBe(
+      false,
+    );
+    expect(semanticMemoryListQuerySchema.safeParse({ scope: "team", stale: "yes" }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe("import and export", () => {

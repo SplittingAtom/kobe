@@ -7,6 +7,10 @@ import { WORKSPACE_SWITCHES_ON, effectiveMemory, type EffectiveMemory } from "..
 import { checkMemoryWrite, type MemoryCheckOutcome } from "../checks.js";
 import { MemoryItemError, notFound } from "./errors.js";
 import { deliverSiteNotices, type PendingSiteNotices } from "./limits.js";
+import {
+  snapshotPortableHolds,
+  type PortableHoldSnapshot,
+} from "../../legal-hold/portable-hold.js";
 import { locate, type Location } from "./location.js";
 import { readItem, type ItemRow } from "./rows.js";
 import { curates, type MemoryWho } from "./who.js";
@@ -16,6 +20,8 @@ type SQL = ReturnType<typeof sql>;
 /** One store call: the scope's location, the switches and Site settings, in one transaction. */
 export interface Op {
   readonly tx: KobeTx;
+  /** Portable scope: Workspace-wide holds and their members, read before the transaction (M1). */
+  readonly portableHolds?: PortableHoldSnapshot;
   readonly loc: Location;
   readonly who: MemoryWho;
   readonly memory: EffectiveMemory;
@@ -34,12 +40,18 @@ export async function inStore<T>(
   who: MemoryWho,
   scope: SemanticMemoryScope,
   fn: (op: Op) => Promise<T>,
+  /** The call may prune versions: portable holds are read first (reads skip it, review N2). */
+  options: { readonly prunes?: boolean } = {},
 ): Promise<T> {
   let pending: PendingSiteNotices = [];
   const teamId = who.teamId;
+  // Read before the transaction opens: never a second pooled connection inside it (review M1).
+  const portableHolds =
+    scope === "portable" && options.prunes ? await snapshotPortableHolds(db) : undefined;
   const body = async (tx: KobeTx) => {
     const op: Op = {
       tx,
+      ...(portableHolds ? { portableHolds } : {}),
       who,
       loc: locate(scope, teamId, who.userId),
       // Without a Workspace only the Site's switches apply (portable and Site requests). Site

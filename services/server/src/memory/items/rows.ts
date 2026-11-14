@@ -10,6 +10,7 @@ import type {
 import { findThreads } from "../../threads/repository.js";
 import { viewerProjectIds } from "../../threads/references.js";
 import { workspaceTeam, type Location } from "./location.js";
+import { isStale } from "./stale.js";
 import { curates, seesSiteAuthors, type MemoryWho } from "./who.js";
 
 /** One item with its current statement, as the store reads it. */
@@ -66,8 +67,16 @@ export async function readItem(
 
 const iso = (d: Date | string) => new Date(d).toISOString();
 
-/** An item as the API returns it, with the author walls of the contract (M6). */
-export function itemToWire(loc: Location, who: MemoryWho, r: ItemRow): SemanticMemoryItem {
+/**
+ * An item as the API returns it, with the author walls of the contract (M6) and the computed
+ * `stale` flag (`staleAfterDays`: the Site setting, KOBE-386).
+ */
+export function itemToWire(
+  loc: Location,
+  who: MemoryWho,
+  r: ItemRow,
+  staleAfterDays: number,
+): SemanticMemoryItem {
   const authors = loc.scope !== "site" || seesSiteAuthors(who);
   return {
     id: r.id,
@@ -85,6 +94,7 @@ export function itemToWire(loc: Location, who: MemoryWho, r: ItemRow): SemanticM
     created_at: iso(r.created_at),
     updated_at: iso(r.updated_at),
     updated_by: authors ? r.updated_by : null,
+    stale: isStale(r, staleAfterDays),
   };
 }
 
@@ -105,6 +115,7 @@ export async function detailOf(
   loc: Location,
   who: MemoryWho,
   row: ItemRow,
+  staleAfterDays: number,
   view: DetailView = {},
 ): Promise<SemanticMemoryItemDetail> {
   const links = loc.workspace
@@ -137,7 +148,7 @@ export async function detailOf(
       created_at: iso(v.created_at),
     };
   });
-  return { ...itemToWire(loc, who, row), versions };
+  return { ...itemToWire(loc, who, row, staleAfterDays), versions };
 }
 
 /** The source conversations among `rows` the caller may open (the thread routes' predicate). */

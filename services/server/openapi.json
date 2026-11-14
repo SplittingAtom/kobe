@@ -10329,6 +10329,15 @@
             }
           },
           {
+            "name": "stale",
+            "in": "query",
+            "required": false,
+            "description": "Only stale items (true) or only fresh ones (false): active items neither changed nor dated (as_of) within the Site's stale threshold.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "q",
             "in": "query",
             "required": false,
@@ -23216,6 +23225,9 @@
                       "type": "null"
                     }
                   ]
+                },
+                "stale": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -23405,6 +23417,9 @@
                 "type": "null"
               }
             ]
+          },
+          "stale": {
+            "type": "boolean"
           },
           "versions": {
             "minItems": 1,

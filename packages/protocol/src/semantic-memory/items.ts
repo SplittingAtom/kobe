@@ -65,6 +65,11 @@ const itemShape = {
   updated_at: timestampSchema,
   /** The current version's author; null only on Site items for readers who may not see it. */
   updated_by: uuidSchema.nullable(),
+  /**
+   * KOBE-386: an active item neither changed nor dated (`as_of`, when set) within the Site's stale
+   * threshold (`stale_after_days`, default 90). A label for review; nothing acts on it.
+   */
+  stale: z.boolean().optional(),
 };
 
 interface ItemRuleFields {
@@ -168,6 +173,8 @@ export const semanticMemoryListQuerySchema = z.strictObject({
   kind: semanticMemoryKindSchema.optional(),
   pinned: queryBooleanSchema.optional(),
   policy: queryBooleanSchema.optional(),
+  /** KOBE-386: only stale items (true) or only fresh ones (false); see `stale` on an item. */
+  stale: queryBooleanSchema.optional(),
   q: z.string().min(1).max(SEMANTIC_MEMORY_QUERY_MAX).optional(),
   limit: z.coerce
     .number()

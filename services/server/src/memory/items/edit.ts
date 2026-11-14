@@ -68,12 +68,15 @@ async function prepare(
 async function finish(op: Op, id: string, events: ServerAuditEvent[]) {
   const row = await readItem(op.tx, op.loc, id);
   if (!row) throw new Error("memory item vanished inside its own transaction");
-  const detail = await detailOf(op.tx, op.loc, op.who, row);
+  const detail = await detailOf(op.tx, op.loc, op.who, row, op.settings.stale_after_days);
   await audit(op, events);
   return detail;
 }
 
 /** Appends a version, moves `current_version` and prunes past the cap. */
+/** Calls that append a statement may prune versions (`inStore` reads portable holds first). */
+const PRUNES = { prunes: true } as const;
+
 async function appendStatement(
   op: Op,
   row: ItemRow,
@@ -93,6 +96,7 @@ async function appendStatement(
     UPDATE ${op.loc.items} i SET current_version = ${version}, updated_at = now()
      WHERE ${op.loc.where} AND i.id = ${row.id}`);
   await pruneVersions(
+    op.portableHolds,
     op.tx,
     op.loc,
     { id: row.id, currentVersion: version, owner: row.owner_user_id },
@@ -116,68 +120,74 @@ export function patchItem(
   id: string,
   body: PatchSemanticMemoryItem,
 ): Promise<SemanticMemoryItemDetail> {
-  return inStore(db, who, scope, async (op) => {
-    const row = await prepare(op, id, body.policy !== undefined, (r) => body.policy ?? r.policy);
-    if (row.status !== "active") throw inactive();
-    assertExpected(row, body.expected_version);
-    if (scope === "portable" && body.kind !== undefined && body.kind !== "preference")
-      throw invalid("Memories in all your workspaces are preferences.");
-    if (scope === "portable" && body.as_of !== undefined)
-      throw invalid("Memories in all your workspaces have no as-of date.");
-    if (scope !== "site" && body.policy !== undefined)
-      throw invalid("Policy exists only on the Site.");
-    if (body.policy === true && row.pinned) throw notPinnable();
+  return inStore(
+    db,
+    who,
+    scope,
+    async (op) => {
+      const row = await prepare(op, id, body.policy !== undefined, (r) => body.policy ?? r.policy);
+      if (row.status !== "active") throw inactive();
+      assertExpected(row, body.expected_version);
+      if (scope === "portable" && body.kind !== undefined && body.kind !== "preference")
+        throw invalid("Memories in all your workspaces are preferences.");
+      if (scope === "portable" && body.as_of !== undefined)
+        throw invalid("Memories in all your workspaces have no as-of date.");
+      if (scope !== "site" && body.policy !== undefined)
+        throw invalid("Policy exists only on the Site.");
+      if (body.policy === true && row.pinned) throw notPinnable();
 
-    const statement = body.statement ?? row.statement;
-    const statementChanged = statement !== row.statement;
-    const policy = body.policy ?? row.policy;
-    if (policy && (statementChanged || !row.policy))
-      await assertPolicyBudget(op.tx, [row.id], statement);
-    const kind = body.kind ?? row.kind;
-    const tags = body.tags ? normaliseTags(body.tags) : row.tags;
-    const checked = statementChanged || policy !== row.policy;
-    const checks = checked
-      ? await saveChecks(op, { statement, policy, except: [row.id], tags }, body.overrides)
-      : NO_OVERRIDES;
-    if (!checked && body.tags) assertNoSecretInTags(tags);
-    const asOf = body.as_of === undefined ? row.as_of : body.as_of;
-    const changed = [
-      ...(statementChanged ? (["statement"] as const) : []),
-      ...(kind !== row.kind ? (["kind"] as const) : []),
-      ...(!sameTags(tags, row.tags) ? (["tags"] as const) : []),
-      ...(asOf !== row.as_of ? (["as_of"] as const) : []),
-    ];
-    const version = statementChanged
-      ? await appendStatement(op, row, statement, checks)
-      : row.current_version;
-    const asOfSql = op.loc.scope === "portable" ? sql`` : sql`, as_of = ${asOf}::date`;
-    const policySql = op.loc.scope === "site" ? sql`, policy = ${policy}` : sql``;
-    if (changed.length > 0 || policy !== row.policy)
-      await op.tx.execute(sql`
+      const statement = body.statement ?? row.statement;
+      const statementChanged = statement !== row.statement;
+      const policy = body.policy ?? row.policy;
+      if (policy && (statementChanged || !row.policy))
+        await assertPolicyBudget(op.tx, [row.id], statement);
+      const kind = body.kind ?? row.kind;
+      const tags = body.tags ? normaliseTags(body.tags) : row.tags;
+      const checked = statementChanged || policy !== row.policy;
+      const checks = checked
+        ? await saveChecks(op, { statement, policy, except: [row.id], tags }, body.overrides)
+        : NO_OVERRIDES;
+      if (!checked && body.tags) assertNoSecretInTags(tags);
+      const asOf = body.as_of === undefined ? row.as_of : body.as_of;
+      const changed = [
+        ...(statementChanged ? (["statement"] as const) : []),
+        ...(kind !== row.kind ? (["kind"] as const) : []),
+        ...(!sameTags(tags, row.tags) ? (["tags"] as const) : []),
+        ...(asOf !== row.as_of ? (["as_of"] as const) : []),
+      ];
+      const version = statementChanged
+        ? await appendStatement(op, row, statement, checks)
+        : row.current_version;
+      const asOfSql = op.loc.scope === "portable" ? sql`` : sql`, as_of = ${asOf}::date`;
+      const policySql = op.loc.scope === "site" ? sql`, policy = ${policy}` : sql``;
+      if (changed.length > 0 || policy !== row.policy)
+        await op.tx.execute(sql`
         UPDATE ${op.loc.items} i SET kind = ${kind}, tags = ${textArray(tags)}, updated_at = now()
                ${asOfSql} ${policySql}
          WHERE ${op.loc.where} AND i.id = ${row.id}`);
 
-    const teamId = auditTeam(op.loc);
-    const events: ServerAuditEvent[] = [];
-    if (changed.length > 0)
-      events.push({
-        action: "memory.item.updated",
-        teamId,
-        target: { scope, itemId: row.id, version, previousVersion: row.current_version, changed },
-      });
-    if (policy !== row.policy)
-      events.push({
-        action: "memory.policy.set",
-        teamId: null,
-        target: { itemId: row.id, version, policy },
-      });
-    events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
-    const after = { kind, tags, policy, asOf };
-    if (scope === "site" && metadataChanged(row, after) && (await siteMemoryHeld(op.tx)))
-      events.push(changedUnderHold(row, after, version));
-    return finish(op, row.id, events);
-  });
+      const teamId = auditTeam(op.loc);
+      const events: ServerAuditEvent[] = [];
+      if (changed.length > 0)
+        events.push({
+          action: "memory.item.updated",
+          teamId,
+          target: { scope, itemId: row.id, version, previousVersion: row.current_version, changed },
+        });
+      if (policy !== row.policy)
+        events.push({
+          action: "memory.policy.set",
+          teamId: null,
+          target: { itemId: row.id, version, policy },
+        });
+      events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
+      const after = { kind, tags, policy, asOf };
+      if (scope === "site" && metadataChanged(row, after) && (await siteMemoryHeld(op.tx)))
+        events.push(changedUnderHold(row, after, version));
+      return finish(op, row.id, events);
+    },
+    PRUNES,
+  );
 }
 
 interface HeldMetadata {
@@ -227,33 +237,39 @@ export function revertItem(
   id: string,
   body: RevertSemanticMemoryItem,
 ): Promise<SemanticMemoryItemDetail> {
-  return inStore(db, who, scope, async (op) => {
-    const row = await prepare(op, id, false);
-    if (row.status !== "active") throw inactive();
-    assertExpected(row, body.expected_version);
-    const { rows } = await op.tx.execute<{ statement: string }>(sql`
+  return inStore(
+    db,
+    who,
+    scope,
+    async (op) => {
+      const row = await prepare(op, id, false);
+      if (row.status !== "active") throw inactive();
+      assertExpected(row, body.expected_version);
+      const { rows } = await op.tx.execute<{ statement: string }>(sql`
       SELECT statement FROM ${op.loc.versions}
        WHERE ${op.loc.versionsOfItem(row.id)} AND version = ${body.version}`);
-    const earlier = rows[0];
-    if (!earlier) throw invalid(`This memory has no version ${body.version} (any more).`);
-    if (row.policy) await assertPolicyBudget(op.tx, [row.id], earlier.statement);
-    const checks = await saveChecks(
-      op,
-      { statement: earlier.statement, policy: row.policy, except: [row.id] },
-      body.overrides,
-    );
-    const version = await appendStatement(op, row, earlier.statement, checks);
-    const teamId = auditTeam(op.loc);
-    const events: ServerAuditEvent[] = [
-      {
-        action: "memory.item.reverted",
-        teamId,
-        target: { scope, itemId: row.id, fromVersion: body.version, version },
-      },
-    ];
-    events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
-    return finish(op, row.id, events);
-  });
+      const earlier = rows[0];
+      if (!earlier) throw invalid(`This memory has no version ${body.version} (any more).`);
+      if (row.policy) await assertPolicyBudget(op.tx, [row.id], earlier.statement);
+      const checks = await saveChecks(
+        op,
+        { statement: earlier.statement, policy: row.policy, except: [row.id] },
+        body.overrides,
+      );
+      const version = await appendStatement(op, row, earlier.statement, checks);
+      const teamId = auditTeam(op.loc);
+      const events: ServerAuditEvent[] = [
+        {
+          action: "memory.item.reverted",
+          teamId,
+          target: { scope, itemId: row.id, fromVersion: body.version, version },
+        },
+      ];
+      events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
+      return finish(op, row.id, events);
+    },
+    PRUNES,
+  );
 }
 
 /** Archive (never deletes; versions stay). Archiving also unpins. Archiving twice is a no-op. */

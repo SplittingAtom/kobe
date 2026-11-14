@@ -14,6 +14,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { removeMemberInTx } from "../../teams/members.js";
+import { reopenRetentionInTx } from "../../offboarding/reopen.js";
 
 /**
  * Site grants beside the role ladder (KOBE-331, SK22): the **Skill reviewer** grant, given and
@@ -97,6 +98,11 @@ export async function joinRegistryTeamInTx(
     )
     .onConflictDoNothing()
     .returning({ userId: teamMembers.userId });
+  await reopenRetentionInTx(
+    tx,
+    teamId,
+    added.map((a) => a.userId),
+  );
   for (const { userId } of added)
     await recordAudit(tx, {
       action: "identity.member.added",

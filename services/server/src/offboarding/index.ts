@@ -1,4 +1,4 @@
-import type { KobeDb } from "@kobe/db";
+import { sql, teams, withTeam, type KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import type { BlobStore } from "../retention/blobs.js";
 import type { ReconcileLock } from "../sandbox/reconcile-lock.js";
@@ -9,9 +9,19 @@ import {
   type OffboardOutcome,
 } from "./destroy.js";
 import { listOffboarded, startExport, type ExportStart, type OffboardedMember } from "./export.js";
-import { departedNotOffboarded, dueForPurge, purgeDeparted } from "./purge.js";
+import {
+  departedMemoryOwners,
+  departedNotOffboarded,
+  dueForPurge,
+  purgeDeparted,
+} from "./purge.js";
 import { reinstateReturning } from "./reinstate.js";
+import { reopenRetentionInTx, reopenReturnedInTx } from "./reopen.js";
 import { sweepDepartedDrafts } from "../retention/skill-drafts.js";
+import {
+  purgePortableForUser,
+  type PortablePurgeOutcome,
+} from "../retention/site-semantic-memory.js";
 import { sweepDepartedSkillEvals } from "../retention/skill-evals.js";
 import {
   RETAIN_DAYS,
@@ -54,6 +64,16 @@ export interface Offboarding {
   ): Promise<OffboardOutcome>;
   /** Account deactivated: every team's sandbox of the user. Throws if any team failed. */
   offboardUser(userId: string, trigger: OffboardTrigger): Promise<void>;
+  /**
+   * A site admin purges a deactivated person's portable memories (Q7, KOBE-386); until then they
+   * are kept, and reactivation finds them unchanged. `paused`: KOBE_RETENTION_PAUSED.
+   */
+  purgePortable(userId: string): Promise<PortablePurgeOutcome | { readonly status: "paused" }>;
+  /**
+   * The person was reactivated (KOBE-386 review H1): their 30-day records in the Workspaces they
+   * are still a member of are reopened, so a later departure gets a fresh 30 days.
+   */
+  reopen(userId: string): Promise<void>;
   /** Team removed: every member's sandbox. Throws if any failed. */
   offboardTeam(teamId: string): Promise<number>;
   /** A returning member's wake: drops the old retained volume. False: refuse (legal hold). */
@@ -105,6 +125,15 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
     // After a restore from an older backup, "departed" and "due" are judged from stale rows: a
     // member re-added since would look long gone and lose their live volume (KOBE-243).
     if (ctx.paused) return { offboarded, purged, held, drafts, failed };
+    // KOBE-386 review H1 backstop: a returned member's record is reopened before anything is due.
+    for (const team of await ctx.db.select({ id: teams.id }).from(teams)) {
+      await withTeam(ctx.db, team.id, (tx) => reopenReturnedInTx(tx, team.id)).catch(
+        (err: unknown) => {
+          failed += 1;
+          log.error({ err, team_id: team.id }, "reopening returned members failed");
+        },
+      );
+    }
     for (const departed of await departedNotOffboarded(ctx, SWEEP_LIMIT)) {
       try {
         if ((await offboardSandbox(ctx, departed, "reconciled")) === "offboarded") offboarded += 1;
@@ -113,6 +142,18 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
         log.error(
           { err, team_id: departed.teamId, user_id: departed.userId },
           "offboarding failed",
+        );
+      }
+    }
+    // KOBE-386: departed owners of personal semantic memories with no sandbox record get one.
+    for (const departed of await departedMemoryOwners(ctx, SWEEP_LIMIT)) {
+      try {
+        if ((await offboardSandbox(ctx, departed, "reconciled")) === "offboarded") offboarded += 1;
+      } catch (err) {
+        failed += 1;
+        log.error(
+          { err, team_id: departed.teamId, user_id: departed.userId },
+          "offboarding of a memory owner failed",
         );
       }
     }
@@ -150,6 +191,17 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
     async offboardUser(userId, trigger) {
       const teamIds = await liveSandboxTeams(ctx, userId);
       await settle(teamIds, (teamId) => offboardSandbox(ctx, { teamId, userId }, trigger));
+    },
+    purgePortable: async (userId) =>
+      ctx.paused ? { status: "paused" as const } : purgePortableForUser(ctx.db, userId),
+    async reopen(userId) {
+      for (const team of await ctx.db.select({ id: teams.id }).from(teams)) {
+        await withTeam(ctx.db, team.id, async (tx) => {
+          const member = await tx.execute(sql`
+            SELECT 1 FROM team_members WHERE team_id = ${team.id} AND user_id = ${userId}`);
+          if ((member.rowCount ?? 0) > 0) await reopenRetentionInTx(tx, team.id, [userId]);
+        });
+      }
     },
     async offboardTeam(teamId) {
       const userIds = await liveSandboxUsers(ctx, teamId);

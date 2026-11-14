@@ -1414,6 +1414,34 @@ export const AUDIT_EVENTS = {
     blobs: count,
     userId: id.optional(),
   }),
+  /**
+   * Semantic memories purged in a Workspace (system, counts only; KOBE-386, SM28): archived and
+   * superseded memories and earlier versions past the Workspace window, plus evidence dropped from
+   * versions whose source conversation was purged (`retention`); a departed member's personal
+   * memories in the Workspace 30 days after they left (`offboarding`, `userId`). Held memories are
+   * never in a batch.
+   */
+  "retention.semantic_memory_purged": event("team", {
+    reason: z.enum(["retention", "offboarding"]),
+    items: count,
+    versions: count,
+    scrubbed: count,
+    userId: id.optional(),
+  }),
+  /**
+   * Site or portable memories purged (KOBE-386, SM28; counts only): archived and superseded
+   * memories and earlier versions past the Site window (`retention`, system), or a deactivated
+   * person's portable memories purged by a site admin (`offboarding`, `userId`). `kept`: refused
+   * by a Workspace's legal hold over a run that used them.
+   */
+  "retention.site_memory_purged": event("site", {
+    lane: z.enum(["site", "portable"]),
+    reason: z.enum(["retention", "offboarding"]),
+    items: count,
+    versions: count,
+    kept: count,
+    userId: id.optional(),
+  }),
   /** Objects of purged rows deleted from object storage (system); `kept`: still referenced. */
   "retention.blobs_deleted": event("team", { blobs: count, kept: count }),
 
