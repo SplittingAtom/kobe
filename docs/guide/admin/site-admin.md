@@ -1,6 +1,6 @@
 ---
 title: Site admin overview
-summary: What site admins do and where each setting lives in the Site console (people, grants such as Site memory steward, teams, models, connectors, egress ceiling, policy floor, appearance, audit and backups).
+summary: What site admins do and where each setting lives in the Site console (people, grants such as Site memory steward, teams, models, connectors, egress ceiling, policy floor, Site memory and Policy with import and export, appearance, audit and backups).
 section: Site admin
 order: 1
 audience: admin
@@ -35,8 +35,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
   - **Skill reviewers** review Skill Registry submissions.
   - **Site memory stewards** curate Site memory: they add, edit, archive and pin the facts and
     conventions every workspace sees, and accept or dismiss the proposals team admins send to
-    the Site. They can't make an item Policy or change memory switches, and the grant gives no other Site
-    right (no Site console pages). Site admins can already do all of this, so only users are
+    the Site. They can't make an item Policy, change Policy or change memory switches, and the
+    grant gives no other Site right (only the Site console's **Memory** page). Site admins can already do all of this, so only users are
     offered. **Take Site memory steward** ends it after a confirmation; what they saved stays.
 
 ## Teams and agents
@@ -100,6 +100,18 @@ access, which is time-boxed, read-only, audited and shown to the team.
 - **Retention maximum**: the longest retention any team may choose.
 - **Legal hold**: suspend purges for a team or user (needs two people).
 - **Break-glass**: request and approve time-boxed, read-only, audited access to one team.
+- **Memory**: the Site's memories and Policy, for Site admins and Site memory stewards. The
+  **Memories** tab lists them with filters (kind, status, tag, and Policy only or not Policy) and
+  adds, edits, archives, restores, pins and tags them through the save checks, with **Undo**.
+  Only Site admins see the **Policy** button on a memory (make it Policy, or ordinary again) and
+  change a Policy item; stewards read Policy. Policy is given to every agent in every workspace
+  in every run, so it is small: the **Policy budget** meters show items of 25 and text of 2,048
+  bytes and warn from 80%. **Import and export** works as on a workspace's Memory page
+  ([Workspace memories](team-admin.md#workspace-memories)): Markdown bullets, CSV or a Kobe
+  export, at most 200 rows, a preview that checks every row with no model, then the new rows
+  only; a Policy row imports only for Site admins and only while Policy has room. Exports are
+  audited. Your own workspace's memory switches don't limit what you curate here (they decide
+  what reaches that workspace's runs). The memory switches stay under **Settings**.
 
 ## System
 

@@ -154,7 +154,7 @@ describe("KOBE-378 review fixes", () => {
     ).toBe(201);
   });
 
-  it("L-4: turning Policy into a plain Site item needs the Workspace's Site memories on", async () => {
+  it("L-4 (superseded by the coordinator's 2026-11-13 decision, KOBE-385): a Site curator demotes Policy whatever their Workspace's Site memories switch", async () => {
     const pol = detail(
       (await save(as.site, "site", unique("policy to demote"), { policy: true })).json,
     );
@@ -163,11 +163,12 @@ describe("KOBE-378 review fixes", () => {
       [teamA],
     );
     try {
-      expect(
-        errorOf(
-          await as.site.patch(`${ITEMS}/site/${pol.id}`, { expected_version: 1, policy: false }),
-        ),
-      ).toEqual([403, "memory_disabled"]);
+      // Switches govern what reaches runs, not curation.
+      const demoted = await as.site.patch(`${ITEMS}/site/${pol.id}`, {
+        expected_version: 1,
+        policy: false,
+      });
+      expect(demoted.status, JSON.stringify(demoted.json)).toBe(200);
       // Editing it as Policy still works (Policy follows the Site master only).
       expect(
         (await as.site.patch(`${ITEMS}/site/${pol.id}`, { expected_version: 1, tags: ["rule"] }))

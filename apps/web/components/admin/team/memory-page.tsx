@@ -1,7 +1,20 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Button, Field, PageHeader, Select } from "../../ui/console";
+import {
+  Button,
+  Field,
+  PageHeader,
+  Select,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../../ui/console";
+import { CuratorMemories } from "../../memory/curator-memories";
+import { ExportPanel } from "../../memory/export-panel";
+import { ImportPanel } from "../../memory/import-panel";
+import { PolicyReadOnly } from "../../memory/policy-budget";
 import { useTeamAccess } from "../console-context";
 import {
   getEffectiveMemory,
@@ -64,11 +77,67 @@ export const WORKSPACE_SWITCHES: readonly SwitchSpec<WorkspaceSwitch>[] = [
 ];
 
 /**
- * Workspace settings › Memory (`/v1/memory/settings?level=team`, KOBE-155, KOBE-381): the
- * Workspace's memory switches and learning model. What applies is the AND with the Site's
- * switches; turning a switch off stops use and deletes nothing.
+ * Workspace console › Memory (KOBE-155, KOBE-381, KOBE-385). **Memories** (the default): the
+ * Workspace's memories for curators (Team admins and memory stewards: list, filters, edit,
+ * archive, restore, pin, tags, import, export), Site memories and Site Policy read-only (Team
+ * admins see the Policy text and change none of it); anyone else here reads only. **Settings**
+ * (Team admins): the memory switches and learning model, AND-ed with the Site's; a switch off
+ * stops use and deletes nothing.
  */
 export function TeamMemoryPage() {
+  const access = useTeamAccess();
+  const teamId = access.team.id;
+  const curate = access.permissions.includes("team.memory.curate");
+  const manage = access.permissions.includes("team.memory.manage");
+  const [generation, setGeneration] = useState(0);
+  return (
+    <>
+      <PageHeader title="Memory" />
+      <Tabs defaultValue="memories">
+        <TabsList label="Memory">
+          <TabsTrigger value="memories">Memories</TabsTrigger>
+          {curate && <TabsTrigger value="transfer">Import and export</TabsTrigger>}
+          {manage && <TabsTrigger value="settings">Settings</TabsTrigger>}
+        </TabsList>
+        <TabsContent value="memories">
+          <p className="m-0 mb-4 text-console-muted">
+            Short statements Kobe gives every agent in this workspace at the start of each run.
+            {curate
+              ? " Nothing is ever deleted: archive what should no longer be used."
+              : " Only Team admins and memory stewards change them."}
+          </p>
+          <CuratorMemories
+            key={generation}
+            teamId={teamId}
+            scopes={[
+              { scope: "team", curate },
+              { scope: "site", curate: false },
+            ]}
+          />
+          <PolicyReadOnly teamId={teamId} />
+        </TabsContent>
+        {curate && (
+          <TabsContent value="transfer">
+            <ImportPanel
+              teamId={teamId}
+              scope="team"
+              onImported={() => setGeneration((g) => g + 1)}
+            />
+            <ExportPanel teamId={teamId} scope="team" />
+          </TabsContent>
+        )}
+        {manage && (
+          <TabsContent value="settings">
+            <TeamMemorySettings />
+          </TabsContent>
+        )}
+      </Tabs>
+    </>
+  );
+}
+
+/** The Settings tab: the Workspace's memory switches and learning model (KOBE-155, KOBE-381). */
+export function TeamMemorySettings() {
   const teamId = useTeamAccess().team.id;
   const { state, reload } = useResource(() => getTeamMemory(teamId));
   const effective = useResource(() => getEffectiveMemory(teamId));
@@ -78,35 +147,32 @@ export function TeamMemoryPage() {
     effective.reload();
   };
   return (
-    <>
-      <PageHeader title="Memory" />
-      <ResourceView state={state} label="memory settings">
-        {(settings) => (
-          <>
-            <MemorySwitchesForm
-              specs={WORKSPACE_SWITCHES}
-              switches={settings}
-              save={(change) => putTeamMemory(teamId, change)}
-              onSaved={saved}
-              notice={(s) => memoryNotice("in this workspace", s, "workspace")}
-            />
-            <ResourceView state={models.state} label="models">
-              {(list) => (
-                <LearningModelForm
-                  teamId={teamId}
-                  alias={settings.learningModelAlias}
-                  models={list}
-                  onSaved={saved}
-                />
-              )}
-            </ResourceView>
-            <ResourceView state={effective.state} label="what applies now">
-              {(e) => <LearnStatus effective={e} />}
-            </ResourceView>
-          </>
-        )}
-      </ResourceView>
-    </>
+    <ResourceView state={state} label="memory settings">
+      {(settings) => (
+        <>
+          <MemorySwitchesForm
+            specs={WORKSPACE_SWITCHES}
+            switches={settings}
+            save={(change) => putTeamMemory(teamId, change)}
+            onSaved={saved}
+            notice={(s) => memoryNotice("in this workspace", s, "workspace")}
+          />
+          <ResourceView state={models.state} label="models">
+            {(list) => (
+              <LearningModelForm
+                teamId={teamId}
+                alias={settings.learningModelAlias}
+                models={list}
+                onSaved={saved}
+              />
+            )}
+          </ResourceView>
+          <ResourceView state={effective.state} label="what applies now">
+            {(e) => <LearnStatus effective={e} />}
+          </ResourceView>
+        </>
+      )}
+    </ResourceView>
   );
 }
 

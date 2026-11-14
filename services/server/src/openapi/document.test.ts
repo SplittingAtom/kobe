@@ -166,7 +166,7 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     // and KOBE-380 (stewards), which then add a "describes exactly" check here.
     expect(documented("/v1/memory/semantic/")).toEqual(
       [
-        "get /v1/memory/semantic/export",
+        "post /v1/memory/semantic/export",
         "post /v1/memory/semantic/import/commit",
         "post /v1/memory/semantic/import/preview",
         "get /v1/memory/semantic/items",

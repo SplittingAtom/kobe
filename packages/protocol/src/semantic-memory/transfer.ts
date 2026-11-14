@@ -18,7 +18,8 @@ import { queryBooleanSchema, semanticMemoryOverridesSchema } from "./items.js";
  *
  * - `POST /v1/memory/semantic/import/preview` body {@link semanticMemoryImportPreviewRequestSchema}
  * - `POST /v1/memory/semantic/import/commit` body {@link semanticMemoryImportCommitRequestSchema}
- * - `GET  /v1/memory/semantic/export?scope=&format=json|csv` -> {@link semanticMemoryExportDocumentSchema}
+ * - `POST /v1/memory/semantic/export` body {@link semanticMemoryExportQuerySchema} (a POST since
+ *   KOBE-385 review L-4: it writes an audit row) -> {@link semanticMemoryExportDocumentSchema}
  *   or CSV ({@link semanticMemoryExportToCsv})
  *
  * Preview is stateless: it runs the deterministic save checks on every row (secret scan, lint,
@@ -65,8 +66,12 @@ export const SEMANTIC_MEMORY_EXPORT_FORMAT = "kobe.memory.v1";
 
 // ----------------------------------------------------------------------------- CSV cells
 
-/** Cells a spreadsheet would run as a formula (CSV injection, M3). */
-const FORMULA_LEAD = /^[=+\-@\t\r]/;
+/**
+ * Cells a spreadsheet would run as a formula (CSV injection, M3): the OWASP leads, their
+ * full-width forms (some LibreOffice locales evaluate them), and a lead after leading spaces
+ * (KOBE-385 review I-2).
+ */
+const FORMULA_LEAD = /^(?:[\t\r]|[ \u00a0\u3000]*[=+\-@\uff1d\uff0b\uff0d\uff20])/u;
 
 /** Export: prefix `'` to a cell a spreadsheet would read as a formula. */
 export const neutraliseCsvCell = (cell: string): string =>

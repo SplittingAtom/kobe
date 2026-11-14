@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import { must } from "../../lib/testing/must";
 import { MemorySwitchesSection } from "./site/memory-switches";
-import { TeamMemoryPage } from "./team/memory-page";
+import { TeamMemorySettings } from "./team/memory-page";
 import { forbidNativeConfirm, renderSite, renderTeam, stubApi } from "./testing";
 
 beforeEach(forbidNativeConfirm);
@@ -73,7 +73,7 @@ const WORKSPACE_LABELS = [
 describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
   it("shows every switch with a plain explanation, all on by default", async () => {
     stubApi(teamRoutes());
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     for (const name of WORKSPACE_LABELS) {
       expect(((await box(name)) as HTMLInputElement).checked, String(name)).toBe(true);
     }
@@ -88,7 +88,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
         .map((k) => [k, false]),
     );
     const calls = stubApi(teamRoutes({ [`PUT ${TEAM}`]: [200, { ...WS_ON, ...off }] }));
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     // Children first: a switch is disabled while what it needs is off.
     for (const name of [...WORKSPACE_LABELS].reverse()) await userEvent.click(await box(name));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -101,7 +101,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
     const calls = stubApi(
       teamRoutes({ [`PUT ${TEAM}`]: [200, { ...WS_ON, site_memories_enabled: false }] }),
     );
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     await userEvent.click(await box(/Site memories reach/));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText(/Memory settings saved in this workspace/);
@@ -110,7 +110,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
 
   it("disables what needs memory while the master switch is off", async () => {
     stubApi(teamRoutes({ [`GET ${TEAM}`]: [200, { ...WS_ON, memory_enabled: false }] }));
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     for (const name of WORKSPACE_LABELS.slice(1)) {
       expect(((await box(name)) as HTMLInputElement).disabled, String(name)).toBe(true);
     }
@@ -120,7 +120,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
     const calls = stubApi(
       teamRoutes({ [`PUT ${TEAM}`]: [200, { ...WS_ON, learning_model_alias: "fast" }] }),
     );
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     await screen.findByText(/Learn from this chat is unavailable: No learning model is set/);
     const select = await screen.findByRole("combobox", {
       name: /Learning model for this workspace/,
@@ -141,7 +141,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
         [`PUT ${TEAM}`]: [200, WS_ON],
       }),
     );
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     const select = (await screen.findByRole("combobox", {
       name: /Learning model for this workspace/,
     })) as HTMLSelectElement;
@@ -155,7 +155,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
 
   it("L8: turning a workspace's memory off says Site Policy still applies", async () => {
     stubApi(teamRoutes({ [`PUT ${TEAM}`]: [200, { ...WS_ON, memory_enabled: false }] }));
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     await userEvent.click(await box(/Allow memory in this workspace/));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText(/Site Policy still applies\. Nothing stored was deleted/);
@@ -170,13 +170,13 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
         ],
       }),
     );
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     await screen.findByText(/uses big \(the site's learning model\)/);
   });
 
   it("shows the server's refusal", async () => {
     stubApi(teamRoutes({ [`PUT ${TEAM}`]: [403, { code: "forbidden", message: "Not allowed." }] }));
-    renderTeam(<TeamMemoryPage />);
+    renderTeam(<TeamMemorySettings />);
     await userEvent.click(await box(/Allow memory in this workspace/));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("Not allowed.");

@@ -87,3 +87,26 @@ export async function readPolicyAndLexemes(
   );
   return { policies: rows, lexemes: mine.rows[0]?.lexemes ?? [] };
 }
+
+/**
+ * Batch form for imports (review-385 M-2): active Policy once, and every statement's lexemes in
+ * one query (`unnest … WITH ORDINALITY`), keyed by statement.
+ */
+export async function readPolicyAndLexemesMany(
+  tx: KobeTx,
+  statements: readonly string[],
+): Promise<{ readonly policies: PolicyEntry[]; readonly lexemes: Map<string, string[]> }> {
+  const { policies } = await readPolicyAndLexemes(tx, "", []);
+  const lexemes = new Map<string, string[]>();
+  const unique = [...new Set(statements)];
+  if (policies.length === 0 || unique.length === 0) return { policies, lexemes };
+  const views = unique.map((s) => lintViews(s).join("\n"));
+  const { rows } = await tx.execute<{ n: number; lexemes: string[] }>(sql`
+    SELECT t.n::int AS n, tsvector_to_array(to_tsvector('english'::regconfig, t.text)) AS lexemes
+      FROM unnest(ARRAY[${sql.join(
+        views.map((v) => sql`${v}`),
+        sql`, `,
+      )}]::text[]) WITH ORDINALITY AS t(text, n)`);
+  for (const r of rows) lexemes.set(unique[r.n - 1] as string, r.lexemes ?? []);
+  return { policies, lexemes };
+}

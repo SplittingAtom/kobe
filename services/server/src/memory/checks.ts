@@ -16,10 +16,16 @@ import {
   extractLinkHosts,
   linkWarnings,
   readEgressModel,
+  type EgressModel,
   type LinkHost,
 } from "./checks/links.js";
 import { findPersonalData } from "./checks/personal.js";
-import { policyConflicts, readPolicyAndLexemes, type PolicyConflict } from "./checks/policy.js";
+import {
+  policyConflicts,
+  readPolicyAndLexemes,
+  type PolicyConflict,
+  type PolicyEntry,
+} from "./checks/policy.js";
 import { findSecret, type SecretHit } from "./checks/secrets.js";
 import {
   NEAR_DUPLICATE_WARNING,
@@ -69,6 +75,20 @@ export interface MemoryCheckEnv {
   readonly loc: Location;
   readonly memory: EffectiveMemory;
   readonly who: MemoryWho;
+  /**
+   * Reads shared by many statements in one transaction (an import's rows; review-385 M-2):
+   * prefetched near-duplicates and Policy lexemes by statement, active Policy and the egress
+   * model read once. Used only for subjects without `except`.
+   */
+  readonly memo?: CheckMemo | undefined;
+}
+
+export interface CheckMemo {
+  readonly duplicates: ReadonlyMap<string, NearDuplicate[]>;
+  readonly policies: readonly PolicyEntry[];
+  readonly lexemes: ReadonlyMap<string, string[]>;
+  /** The egress model per judging Workspace (null = the Site ceiling), filled on first use. */
+  readonly egress: Map<string | null, Promise<EgressModel>>;
 }
 
 /** The text being saved and what it becomes. */
@@ -186,19 +206,29 @@ export async function evaluateMemoryWrite(
   if (text.invalid !== null || text.secret !== null)
     return { ...text, warnings: [], duplicates: [], policyConflicts: [] };
   const except = subject.except ?? [];
+  const memo = except.length === 0 ? env.memo : undefined;
+  const egressTeam = egressTeamFor(subject.scope, env.loc.teamId);
+  const egress = () => {
+    if (!memo) return readEgressModel(env.tx, egressTeam);
+    const known = memo.egress.get(egressTeam);
+    if (known) return known;
+    const read = readEgressModel(env.tx, egressTeam);
+    memo.egress.set(egressTeam, read);
+    return read;
+  };
   const links =
-    text.links.length === 0
-      ? []
-      : linkWarnings(
-          text.links,
-          await readEgressModel(env.tx, egressTeamFor(subject.scope, env.loc.teamId)),
-          subject.scope,
-        );
-  const duplicates = await findNearDuplicates(env.tx, env.loc, subject.statement, except);
+    text.links.length === 0 ? [] : linkWarnings(text.links, await egress(), subject.scope);
+  const duplicates =
+    memo?.duplicates.get(subject.statement) ??
+    (await findNearDuplicates(env.tx, env.loc, subject.statement, except));
   let conflicts: PolicyConflict[] = [];
   if (!subject.policy && env.memory.policy) {
-    const { policies, lexemes } = await readPolicyAndLexemes(env.tx, subject.statement, except);
-    conflicts = policyConflicts(subject.statement, lexemes, policies);
+    const lexemes = memo?.lexemes.get(subject.statement);
+    const read =
+      memo && (lexemes !== undefined || memo.policies.length === 0)
+        ? { policies: memo.policies, lexemes: lexemes ?? [] }
+        : await readPolicyAndLexemes(env.tx, subject.statement, except);
+    conflicts = policyConflicts(subject.statement, read.lexemes, read.policies);
   }
   return {
     invalid: null,

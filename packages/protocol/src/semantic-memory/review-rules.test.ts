@@ -126,7 +126,20 @@ describe("M3: export keeps status and supersession; CSV is not injectable", () =
   });
 
   it("neutralises formula cells on export and restores them on import", () => {
-    for (const lead of ["=", "+", "-", "@", "\t", "\r"]) {
+    for (const lead of [
+      "=",
+      "+",
+      "-",
+      "@",
+      "\t",
+      "\r",
+      "\uff1d",
+      "\uff0b",
+      "\uff0d",
+      "\uff20",
+      "  =",
+      "\u3000@",
+    ]) {
       const cell = `${lead}SUM(A1)`;
       expect(neutraliseCsvCell(cell)).toBe(`'${cell}`);
       expect(restoreCsvCell(neutraliseCsvCell(cell))).toBe(cell);

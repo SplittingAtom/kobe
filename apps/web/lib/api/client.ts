@@ -286,10 +286,13 @@ export function errorKind(error: ApiError): ErrorKind {
   return "other";
 }
 
-/** A GET whose body is binary: the response when it is ok, else the same `ApiError`s as `apiRequest`. */
+/**
+ * A GET (or, with `json`, a POST) whose body is binary: the response when it is ok, else the same
+ * `ApiError`s as `apiRequest`.
+ */
 async function getBinary(
   path: string,
-  options: Pick<RequestOptions, "teamId" | "fetchFn">,
+  options: Pick<RequestOptions, "teamId" | "fetchFn" | "json">,
 ): Promise<
   { readonly ok: true; readonly res: Response } | { readonly ok: false; readonly error: ApiError }
 > {
@@ -297,9 +300,16 @@ async function getBinary(
   const { teamId, fetchFn = fetch } = options;
   const headers = new Headers();
   if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
+  const post = options.json !== undefined;
+  if (post) headers.set("content-type", "application/json");
   let res: Response;
   try {
-    res = await fetchFn(path, { method: "GET", headers, credentials: "same-origin" });
+    res = await fetchFn(path, {
+      method: post ? "POST" : "GET",
+      headers,
+      credentials: "same-origin",
+      ...(post ? { body: JSON.stringify(options.json) } : {}),
+    });
   } catch {
     return { ok: false, error: fallback(0) };
   }
@@ -307,10 +317,13 @@ async function getBinary(
   return { ok: true, res };
 }
 
-/** GET of a binary body (a skill bundle); errors are the same `ApiError`s as `apiRequest`. */
+/**
+ * GET of a binary body (a skill bundle), or a POST with `json` (a download that is also a write,
+ * such as an audited export); errors are the same `ApiError`s as `apiRequest`.
+ */
 export async function apiDownload(
   path: string,
-  options: Pick<RequestOptions, "teamId" | "fetchFn"> = {},
+  options: Pick<RequestOptions, "teamId" | "fetchFn" | "json"> = {},
 ): Promise<ApiResult<Uint8Array>> {
   const got = await getBinary(path, options);
   if (!got.ok) return got;

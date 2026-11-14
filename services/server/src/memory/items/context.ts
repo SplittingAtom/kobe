@@ -9,7 +9,7 @@ import { MemoryItemError, notFound } from "./errors.js";
 import { deliverSiteNotices, type PendingSiteNotices } from "./limits.js";
 import { locate, type Location } from "./location.js";
 import { readItem, type ItemRow } from "./rows.js";
-import type { MemoryWho } from "./who.js";
+import { curates, type MemoryWho } from "./who.js";
 
 type SQL = ReturnType<typeof sql>;
 
@@ -42,9 +42,12 @@ export async function inStore<T>(
       tx,
       who,
       loc: locate(scope, teamId, who.userId),
-      // Without a Workspace only the Site's switches apply (portable and Site requests).
+      // Without a Workspace only the Site's switches apply (portable and Site requests). Site
+      // curators curating Site items aren't limited by their active Workspace's switches either
+      // (coordinator 2026-11-13, KOBE-385): those govern what reaches that Workspace's runs, so
+      // an admin tool's read from inside a run (KOBE-650) keeps them.
       memory:
-        teamId === null
+        teamId === null || (scope === "site" && who.viaAgent !== true && curates(who, "site"))
           ? effectiveMemory(await readSiteSwitches(tx), WORKSPACE_SWITCHES_ON)
           : (await readSwitches(tx, teamId)).memory,
       settings: await readMemorySiteSettings(tx),
