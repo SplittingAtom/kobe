@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb } from "./client.js";
 import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
+import { pgCodeOf } from "./pg-errors.js";
 import { withTeam } from "./with-team.js";
 
 /**
@@ -60,13 +61,12 @@ async function release(id: string): Promise<void> {
   );
 }
 
-async function pgCode(promise: Promise<unknown>): Promise<string | undefined> {
+async function rejectionCode(promise: Promise<unknown>): Promise<string | undefined> {
   try {
     await promise;
     return undefined;
   } catch (err) {
-    const e = err as { code?: string; cause?: { code?: string } };
-    return e.cause?.code ?? e.code;
+    return pgCodeOf(err);
   }
 }
 
@@ -106,7 +106,7 @@ describe("skill eval rows (KOBE-325)", () => {
     const u = await user("Author");
     const id = await evalRun(t, u);
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(
           t,
           `UPDATE skill_eval_runs SET status = 'completed', finished_at = now() WHERE id = '${id}'`,
@@ -118,10 +118,14 @@ describe("skill eval rows (KOBE-325)", () => {
       `UPDATE skill_eval_runs SET status = 'completed', finished_at = now(), scorecard = '{"format":1}' WHERE id = '${id}'`,
     );
     expect(
-      await pgCode(inTeam(t, `UPDATE skill_eval_runs SET status = 'failed' WHERE id = '${id}'`)),
+      await rejectionCode(
+        inTeam(t, `UPDATE skill_eval_runs SET status = 'failed' WHERE id = '${id}'`),
+      ),
     ).toBe("23514");
     expect(
-      await pgCode(inTeam(t, `UPDATE skill_eval_runs SET progress_done = 3 WHERE id = '${id}'`)),
+      await rejectionCode(
+        inTeam(t, `UPDATE skill_eval_runs SET progress_done = 3 WHERE id = '${id}'`),
+      ),
     ).toBe("23514");
   });
 
@@ -140,17 +144,17 @@ describe("skill eval rows (KOBE-325)", () => {
       `INSERT INTO skill_eval_results (team_id, eval_run_id, case_id, with_skill) VALUES ('${t}', '${id}', 'a', true)`,
     );
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(t, `UPDATE skill_eval_results SET state = 'done' WHERE eval_run_id = '${id}'`),
       ),
     ).toBe("23514");
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(t, `UPDATE skill_eval_results SET state = 'running' WHERE eval_run_id = '${id}'`),
       ),
     ).toBe("23514");
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(
           t,
           `UPDATE skill_eval_results SET state = 'running', deadline_at = now(), thread_id = '${otherThread}' WHERE eval_run_id = '${id}'`,
@@ -165,7 +169,7 @@ describe("skill eval rows (KOBE-325)", () => {
     const id = await evalRun(t, u);
     const thread = randomUUID();
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(
           t,
           `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval_run_id) VALUES ('${t}', '${thread}', '${u}', 't', '${id}')`,
@@ -173,7 +177,7 @@ describe("skill eval rows (KOBE-325)", () => {
       ),
     ).toBe("23514");
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(
           t,
           `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval, skill_test) VALUES ('${t}', '${thread}', '${u}', 't', true, true)`,
@@ -222,7 +226,9 @@ describe("skill eval rows (KOBE-325)", () => {
     expect(del.rowCount).toBe(0);
     const res = await inTeam(t, `DELETE FROM skill_eval_results WHERE eval_run_id = '${id}'`);
     expect(res.rowCount).toBe(0);
-    expect(await pgCode(admin.query(`TRUNCATE skill_eval_results`))).toBe(LEGAL_HOLD_SQLSTATE);
+    expect(await rejectionCode(admin.query(`TRUNCATE skill_eval_results`))).toBe(
+      LEGAL_HOLD_SQLSTATE,
+    );
     const still = await inTeam(
       t,
       `SELECT count(*)::int AS n FROM skill_eval_results WHERE eval_run_id = '${id}'`,
@@ -283,11 +289,11 @@ describe("eval sandboxes on the wire (KOBE-325)", () => {
     const b = await thread(t, u, true);
     await evalConnection(t, u, a);
     await evalConnection(t, u, b);
-    expect(await pgCode(evalConnection(t, u, a))).toBe("23505");
+    expect(await rejectionCode(evalConnection(t, u, a))).toBe("23505");
     // Only an eval thread, and only as its owner.
-    expect(await pgCode(evalConnection(t, u, await thread(t, u, false)))).toBe("23514");
-    expect(await pgCode(evalConnection(t, other, await thread(t, u, true)))).toBe("23514");
-    expect(await pgCode(evalConnection(t, u, randomUUID()))).toBe("23503");
+    expect(await rejectionCode(evalConnection(t, u, await thread(t, u, false)))).toBe("23514");
+    expect(await rejectionCode(evalConnection(t, other, await thread(t, u, true)))).toBe("23514");
+    expect(await rejectionCode(evalConnection(t, u, randomUUID()))).toBe("23503");
     const own = await inTeam(
       t,
       `SELECT count(*)::int AS n FROM sandbox_connections WHERE user_id = '${u}'`,
@@ -311,15 +317,17 @@ describe("eval sandboxes on the wire (KOBE-325)", () => {
       await insert(t, u, normal, "");
       await insert(t, u, ev, `e-${ev}`);
       // A normal thread never reaches an eval sandbox, its own id or another's.
-      expect(await pgCode(insert(t, u, normal, `e-${normal}`))).toBe("23514");
-      expect(await pgCode(insert(t, u, normal, `e-${ev}`))).toBe("23514");
+      expect(await rejectionCode(insert(t, u, normal, `e-${normal}`))).toBe("23514");
+      expect(await rejectionCode(insert(t, u, normal, `e-${ev}`))).toBe("23514");
       // An eval thread never reaches the member's sandbox or another eval thread's.
-      expect(await pgCode(insert(t, u, ev, ""))).toBe("23514");
-      expect(await pgCode(insert(t, u, ev, `e-${ev2}`))).toBe("23514");
-      expect(await pgCode(insert(t, u, normal, "e-not-a-uuid"))).toBe("23514");
+      expect(await rejectionCode(insert(t, u, ev, ""))).toBe("23514");
+      expect(await rejectionCode(insert(t, u, ev, `e-${ev2}`))).toBe("23514");
+      expect(await rejectionCode(insert(t, u, normal, "e-not-a-uuid"))).toBe("23514");
     }
     expect(
-      await pgCode(inTeam(t, `UPDATE sandbox_commands SET slot = '' WHERE thread_id = '${ev}'`)),
+      await rejectionCode(
+        inTeam(t, `UPDATE sandbox_commands SET slot = '' WHERE thread_id = '${ev}'`),
+      ),
     ).toBe("23514");
   });
 
@@ -329,10 +337,10 @@ describe("eval sandboxes on the wire (KOBE-325)", () => {
     const normal = await thread(t, u, false);
     const ev = await thread(t, u, true);
     expect(
-      await pgCode(inTeam(t, `UPDATE threads SET skill_eval = true WHERE id = '${normal}'`)),
+      await rejectionCode(inTeam(t, `UPDATE threads SET skill_eval = true WHERE id = '${normal}'`)),
     ).toBe("55000");
     expect(
-      await pgCode(inTeam(t, `UPDATE threads SET skill_eval = false WHERE id = '${ev}'`)),
+      await rejectionCode(inTeam(t, `UPDATE threads SET skill_eval = false WHERE id = '${ev}'`)),
     ).toBe("55000");
     await inTeam(t, `UPDATE threads SET title = 'renamed' WHERE id = '${ev}'`);
   });
@@ -344,19 +352,21 @@ describe("eval sandboxes on the wire (KOBE-325)", () => {
     const other = await evalRun(t, u);
     const ev = await thread(t, u, true, id);
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(t, `UPDATE threads SET skill_eval_run_id = '${other}' WHERE id = '${ev}'`),
       ),
     ).toBe("55000");
     await inTeam(t, `UPDATE threads SET skill_eval_run_id = NULL WHERE id = '${ev}'`);
     expect(
-      await pgCode(inTeam(t, `UPDATE threads SET skill_eval_run_id = '${id}' WHERE id = '${ev}'`)),
+      await rejectionCode(
+        inTeam(t, `UPDATE threads SET skill_eval_run_id = '${id}' WHERE id = '${ev}'`),
+      ),
     ).toBe("55000");
     const normal = await thread(t, u, false);
     await lease(t, u, ev, `e-${ev}`);
     await lease(t, u, normal, "");
     expect(
-      await pgCode(
+      await rejectionCode(
         inTeam(
           t,
           `UPDATE sandbox_run_leases SET sandbox_id = '${randomUUID()}' WHERE thread_id = '${ev}'`,
@@ -381,9 +391,9 @@ describe("eval sandboxes on the wire (KOBE-325)", () => {
         `INSERT INTO skill_eval_results (team_id, eval_run_id, case_id, with_skill, state, thread_id, deadline_at)
          VALUES ('${t}', '${id}', 'a', true, 'running', '${threadId}', now())`,
       );
-    expect(await pgCode(result(await thread(t, u, false)))).toBe("23514");
-    expect(await pgCode(result(await thread(t, u, true, otherRun)))).toBe("23514");
-    expect(await pgCode(result(await thread(t, u, true)))).toBe("23514");
+    expect(await rejectionCode(result(await thread(t, u, false)))).toBe("23514");
+    expect(await rejectionCode(result(await thread(t, u, true, otherRun)))).toBe("23514");
+    expect(await rejectionCode(result(await thread(t, u, true)))).toBe("23514");
     await result(await thread(t, u, true, id));
   });
 

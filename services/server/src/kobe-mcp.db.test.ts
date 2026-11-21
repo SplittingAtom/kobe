@@ -23,7 +23,7 @@ import { KOBE_BUILTIN_CONNECTOR_ID as PROTOCOL_KOBE_ID } from "@kobe/protocol";
 import { llmsTxt, PAGES } from "@kobe/guide";
 import { withTeam } from "@kobe/db";
 import { approvalKeyring } from "./approvals/index.js";
-import { delegationBacked } from "./kobe-mcp/delegation-live.js";
+import { delegationBacked, delegationBacking } from "./kobe-mcp/delegation-live.js";
 import { kobeRunServer } from "./kobe-mcp/run.js";
 import { KOBE_ADMIN_TOOLS } from "./kobe-mcp/tools/index.js";
 import { createInternalApp } from "./routes/internal.js";
@@ -731,6 +731,9 @@ describe("review fixes (KOBE-619)", () => {
     const opts = { ssoEnabled: true, ssoMfaProof: true };
     expect(await delegationBacked(db, d, { ssoEnabled: true })).toBe(true);
     expect(await delegationBacked(db, d, opts)).toBe(false);
+    // KOBE-731: requireSession reads both answers in one query.
+    const both = (withMfaProof: boolean) => ({ backed: true, withMfaProof });
+    expect(await delegationBacking(db, d, { ssoEnabled: true })).toEqual(both(false));
     await fx.admin.query(
       `UPDATE session_sso_contexts SET mfa_satisfied = true
         WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1)`,
@@ -752,8 +755,14 @@ describe("review fixes (KOBE-619)", () => {
       [w.admin.id],
     );
     expect(await delegationBacked(db, d, opts)).toBe(true);
+    expect(await delegationBacking(db, d, { ssoEnabled: true })).toEqual(both(true));
     await fx.admin.query(`UPDATE users SET two_factor_enabled = false WHERE id = $1`, [w.admin.id]);
     expect(await delegationBacked(db, d, opts)).toBe(false);
+    expect(await delegationBacking(db, d, { ssoEnabled: true })).toEqual(both(false));
+    expect(await delegationBacking(db, d, { ssoEnabled: false })).toEqual({
+      backed: true,
+      withMfaProof: false,
+    });
   });
 
   it("L3: the role change itself refuses another before-state (409 changed_since_approval)", async () => {

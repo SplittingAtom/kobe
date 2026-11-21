@@ -52,6 +52,7 @@ import { LICENSE_PATTERN, MANIFEST_PATH } from "@kobe/protocol";
 import { recordedSaves } from "../skills/drafts/saves.js";
 import type { WorkspaceSync } from "../workspace-sync/index.js";
 import { skillJson, versionJson } from "./skill-json.js";
+import { param, readJson } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 type Status = 400 | 403 | 404 | 409 | 413 | 422 | 428 | 429 | 503;
@@ -204,7 +205,7 @@ export function skillDraftRoutes(
     }
   };
 
-  const json = async (c: Ctx): Promise<unknown> => c.req.json().catch(() => undefined);
+  const json = async (c: Ctx): Promise<unknown> => readJson(c, undefined);
 
   const mayStart = (c: Ctx) => teamRoleAllows(c.get("team").role, "team.personal.create");
   const NO_DRAFTS = "Your team role doesn't allow drafts.";
@@ -394,7 +395,7 @@ export function skillDraftRoutes(
   });
 
   app.get("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const found = id.success ? await readDraft(ctxOf(c), id.data) : null;
     if (!found) return error(c, 404, "not_found", "No such draft.");
     c.header("ETag", `"${found.draft.rev}"`);
@@ -405,7 +406,7 @@ export function skillDraftRoutes(
   });
 
   app.patch("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     const rev = ifMatch(c);
     if (rev === null) return error(c, 428, "precondition_required", "Send If-Match: <rev>.");
@@ -417,7 +418,7 @@ export function skillDraftRoutes(
   });
 
   app.delete("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     const ctx = ctxOf(c);
     const result = await removeDraft(ctx, id.data);
@@ -431,7 +432,7 @@ export function skillDraftRoutes(
   });
 
   app.get("/:id/files/*", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const path = id.success ? filePath(c, id.data) : null;
     if (!id.success || path === null) return error(c, 404, "not_found", "No such file.");
     const ctx = ctxOf(c);
@@ -461,7 +462,7 @@ export function skillDraftRoutes(
    * body is read only up to that room (review S3); the write checks again under the draft's lock.
    */
   const fileChange = async (c: Ctx, mode: "put" | "delete") => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const path = id.success ? filePath(c, id.data) : null;
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     if (path === null) return error(c, 400, "invalid_path", "That file path doesn't decode.");
@@ -509,7 +510,7 @@ export function skillDraftRoutes(
    * The version number inside is a placeholder: Save version writes the number it saves as.
    */
   app.post("/:id/manifest", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     const rev = ifMatch(c);
     if (rev === null) return error(c, 428, "precondition_required", "Send If-Match: <rev>.");
@@ -590,7 +591,7 @@ export function skillDraftRoutes(
   // The live scan preview (SK12): the verdict tier and findings of the draft as stored now. Only
   // a request that needs a new scan counts against the rate (review S3).
   app.get("/:id/scan", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     const result = await previewDraftScan(ctxOf(c), id.data, {
       admit: () => previewAllowed(c),
@@ -626,7 +627,7 @@ export function skillDraftRoutes(
 
   // The bump Save version suggests (SK14) against the destination's latest version.
   app.get("/:id/bump", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     const destination = destinationSchema.safeParse(c.req.query("destination"));
     if (!destination.success)
@@ -645,7 +646,7 @@ export function skillDraftRoutes(
   });
 
   app.post("/:id/versions", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
     const body = saveSchema.safeParse(await json(c));
     if (!body.success)

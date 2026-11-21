@@ -10,8 +10,8 @@ import {
   type ToggleError,
 } from "../connectors/thread-connectors.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const toggleBodySchema = z.strictObject({ enabled: z.boolean() });
 
@@ -75,7 +75,7 @@ export function threadConnectorRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
   });
 
   app.get("/:id/connectors", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const viewer = viewerOf(c);
     const list = await withTeam(db, viewer.teamId, async (tx) => {
@@ -100,8 +100,8 @@ export function threadConnectorRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
   });
 
   app.put("/:id/connectors/:connectorId", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
-    const connectorId = uuidSchema.safeParse(c.req.param("connectorId"));
+    const id = param(c, "id", uuidSchema);
+    const connectorId = param(c, "connectorId", uuidSchema);
     const toggle = await parseBody(c, toggleBodySchema);
     if (!id.success || !connectorId.success || !toggle) {
       return invalidRequest(c, "Give enabled: true or false.");

@@ -11,8 +11,8 @@ import {
   withdrawExpectation,
   type ExpectationFailure,
 } from "../sso/linking.js";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
@@ -63,7 +63,7 @@ export function siteSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
   const db = deps.database.db;
   app.use(async (c, next) => {
     if (!deps.sso.settings.enabled) {
-      return c.json({ code: "not_found", message: "Not found." }, 404);
+      return notFound(c, "not_found", "Not found.");
     }
     c.header("Cache-Control", "no-store");
     await next();
@@ -72,14 +72,14 @@ export function siteSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
 
   /** The target user's id, or a refusal: unknown user, or an Admin/Owner acted on by a non-Owner. */
   async function target(c: Ctx): Promise<{ userId: string } | Response> {
-    const parsed = idSchema.safeParse(c.req.param("userId"));
+    const parsed = param(c, "userId", idSchema);
     if (!parsed.success) return invalidRequest(c);
     const [row] = await db
       .select({ id: users.id, role: siteRoles.role })
       .from(users)
       .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
       .where(eq(users.id, parsed.data));
-    if (!row) return c.json({ code: "user_not_found", message: "No Kobe user with that id." }, 404);
+    if (!row) return notFound(c, "user_not_found", "No Kobe user with that id.");
     if (row.role !== null && row.id !== c.get("user").id && c.get("siteRole") !== "owner") {
       return c.json(
         { code: "forbidden", message: "Only the Owner changes the sign-in of an Admin." },
@@ -89,7 +89,7 @@ export function siteSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
     return { userId: row.id };
   }
 
-  const providerParam = (c: Ctx) => idSchema.safeParse(c.req.param("providerId"));
+  const providerParam = (c: Ctx) => param(c, "providerId", idSchema);
 
   app.get("/users/:userId/links", async (c) => {
     const t = await target(c);
@@ -124,7 +124,7 @@ export function siteSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
     if (!providerId.success) return invalidRequest(c);
     const done = await withdrawExpectation(db, { providerId: providerId.data, userId: t.userId });
     if (!done) {
-      return c.json({ code: "not_found", message: "No expected link for this provider." }, 404);
+      return notFound(c, "not_found", "No expected link for this provider.");
     }
     return c.json({ withdrawn: true });
   });
@@ -141,7 +141,7 @@ export function siteSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
     });
     if (result.ok) return c.json({ unlinked: true, sessionsEnded: result.sessionsEnded });
     return result.failure === "not_linked"
-      ? c.json({ code: "not_found", message: "Not linked to this provider." }, 404)
+      ? notFound(c, "not_found", "Not linked to this provider.")
       : c.json(
           {
             code: "last_sign_in_method",

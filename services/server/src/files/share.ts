@@ -5,7 +5,7 @@ import {
   type FileShareFrame,
   type SharedFile,
 } from "@kobe/protocol";
-import { files, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { files, sql, withTeam, type KobeDb, type KobeTx, pgCodeOf } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { AppendError, appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { logger } from "../logger.js";
@@ -102,12 +102,6 @@ class QuotaError extends Error {}
 
 const PENDING_GRACE = sql.raw(`interval '1 hour'`);
 const WORKSPACE_ROOT = "/workspace/";
-
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: unknown; cause?: { code?: unknown } };
-  const code = e.cause?.code ?? e.code;
-  return typeof code === "string" ? code : undefined;
-}
 
 /** `input.path` as a manifest path: `/workspace/a/b` and `a/b` both give `a/b`; else undefined. */
 export function manifestPath(inputPath: string): string | undefined {
@@ -435,7 +429,7 @@ async function afterFailure(
   // Only an error raised inside the transaction is a definite rollback; anything else (a failed
   // or ambiguous COMMIT) may have committed the row, so the object stays (retention keeps a
   // referenced one).
-  if (runEnded || err instanceof QuotaError || pgCode(err) === "23505") await discard(blobs, key);
+  if (runEnded || err instanceof QuotaError || pgCodeOf(err) === "23505") await discard(blobs, key);
   if (runEnded) return RUN_ENDED;
   if (err instanceof QuotaError) {
     return fail(
@@ -444,7 +438,7 @@ async function afterFailure(
       "quota_exceeded",
     );
   }
-  if (pgCode(err) === "23505") {
+  if (pgCodeOf(err) === "23505") {
     // A concurrent copy of the same tool call won: answer with its result.
     const prior = await withTeam(deps.db, target.teamId, (tx) =>
       existing(tx, target.teamId, frame.tool_call_id),

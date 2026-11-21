@@ -18,7 +18,7 @@ import {
   updateTopicTag,
   type Tag,
 } from "../skills/tags.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const idSchema = z.uuid();
 
@@ -27,7 +27,7 @@ const tagJson = (t: Tag) => ({ id: t.id, name: t.name, kind: t.kind, status: t.s
 const tagConflict = (c: Context, code: "exists" | "not_found") =>
   code === "exists"
     ? c.json({ code: "tag_exists", message: "A tag with that name already exists." }, 409)
-    : c.json({ code: "not_found", message: "No topic tag with that id." }, 404);
+    : notFound(c, "not_found", "No topic tag with that id.");
 
 /**
  * Catalog tags and the Default tag (`/v1/site/skills`, KOBE-314, SK5–SK8): the topic vocabulary,
@@ -54,7 +54,7 @@ export function siteSkillTagRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   });
 
   app.patch("/tags/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const body = await parseBody(c, updateTopicTagSchema);
     if (!id.success || !body) return invalidRequest(c, "Send a new name, a status or both.");
     const r = await updateTopicTag(db, id.data, body);
@@ -64,13 +64,12 @@ export function siteSkillTagRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   app.get("/catalog", async (c) => c.json({ skills: await listSiteCatalog(db, c.get("user").id) }));
 
   app.put("/catalog/:skillId/tags", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const body = await parseBody(c, putSkillTagsSchema);
     if (!id.success || !body) return invalidRequest(c, "Send system and topic tag lists.");
     const r = await setSkillTags(db, id.data, body, c.get("user").id);
     if (r.ok) return c.json({ system: r.system, topic: r.topic, syncId: r.syncId });
-    if (r.code === "not_found")
-      return c.json({ code: "not_found", message: "No catalog skill with that id." }, 404);
+    if (r.code === "not_found") return notFound(c, "not_found", "No catalog skill with that id.");
     if (r.code === "no_version")
       return c.json(
         { code: "no_version", message: "Default needs an approved version of the skill." },
@@ -87,7 +86,7 @@ export function siteSkillTagRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   });
 
   app.post("/catalog/:skillId/default/move-major", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const body = await parseBody(c, moveDefaultMajorSchema);
     if (!id.success || !body) return invalidRequest(c, "Send the major version to move to.");
     const r = await moveDefaultMajor(db, id.data, body.to, c.get("user").id);

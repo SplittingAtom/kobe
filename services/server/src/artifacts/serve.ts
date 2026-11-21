@@ -1,10 +1,10 @@
-import type { Readable } from "node:stream";
 import {
   ARTIFACT_CONTENT_MAX_BYTES,
   artifactFileExtension,
   artifactFileStem,
 } from "@kobe/protocol";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
+import { readCappedStream } from "../http/read-capped.js";
 
 /** Pure helpers of the artifact routes: file names, the iframe document and its headers. */
 
@@ -59,29 +59,6 @@ export function svgDocument(svg: string): string {
 }
 
 /**
- * A body read to the end, or "too_large" (the stream destroyed) once it passes `maxBytes`. A
- * stream error rejects; callers log it with their context. Shared by the artifact and workspace
- * frame routes.
- */
-export async function readCappedBody(
-  body: Readable,
-  maxBytes: number,
-): Promise<Buffer | "too_large"> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of body) {
-    const b = Buffer.from(chunk as Uint8Array);
-    bytes += b.length;
-    if (bytes > maxBytes) {
-      body.destroy();
-      return "too_large";
-    }
-    chunks.push(b);
-  }
-  return Buffer.concat(chunks);
-}
-
-/**
  * The version's bytes from the thread's own object tree, capped at the artifact size limit, or why
  * not: `missing` (no object, or a key outside the thread's tree) or `too_large`. A storage error
  * throws.
@@ -99,7 +76,7 @@ export async function readArtifactVersion(
     object.body.destroy();
     return "too_large";
   }
-  return readCappedBody(object.body, ARTIFACT_CONTENT_MAX_BYTES);
+  return (await readCappedStream(object.body, ARTIFACT_CONTENT_MAX_BYTES)) ?? "too_large";
 }
 
 /** {@link readArtifactVersion}, undefined when nothing is served (missing or too large). */

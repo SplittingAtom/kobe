@@ -27,6 +27,7 @@ import {
   trace,
   withSpan,
 } from "@kobe/telemetry";
+import { readCapped } from "../http/read-capped.js";
 
 /**
  * The server's own model calls (KOBE-219 titles, KOBE-222 follow-ups) through the model gateway,
@@ -215,25 +216,6 @@ function bodyOf(input: ServerCallInput): ServerCallRequest {
     ...(input.reasoning ? { reasoning_effort: SERVER_CALL_REASONING_EFFORT } : {}),
     ...format,
   });
-}
-
-/** Reads at most `cap` bytes of the body; undefined when it is longer or unreadable. */
-async function readCapped(res: Response, cap: number): Promise<string | undefined> {
-  if (!res.body) return "";
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > cap) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 export function parseJson(text: string | undefined): unknown {

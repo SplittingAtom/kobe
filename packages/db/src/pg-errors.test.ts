@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isForeignKeyViolation, isLockConflict, isLockTimeout, pgCodeOf } from "./pg-errors.js";
+import {
+  isForeignKeyViolation,
+  isLockConflict,
+  isLockTimeout,
+  isUniqueViolation,
+  pgCodeOf,
+} from "./pg-errors.js";
 
 const wrapped = (fields: Record<string, unknown>) =>
   Object.assign(new Error("Failed query"), { cause: Object.assign(new Error("db"), fields) });
@@ -25,5 +31,21 @@ describe("pg error helpers", () => {
     expect(isForeignKeyViolation(err, "threads_forked_from_fk")).toBe(true);
     expect(isForeignKeyViolation(err, "other_fk")).toBe(false);
     expect(isForeignKeyViolation(wrapped({ code: "23505" }), "threads_forked_from_fk")).toBe(false);
+  });
+
+  it("matches a unique violation, with or without a constraint, however deep it is wrapped", () => {
+    const err = wrapped({ code: "23505", constraint: "projects_slug_unique" });
+    const twice = Object.assign(new Error("rethrown"), { cause: err });
+    expect(isUniqueViolation(err)).toBe(true);
+    expect(isUniqueViolation(twice)).toBe(true);
+    expect(isUniqueViolation(twice, "projects_slug_unique")).toBe(true);
+    expect(isUniqueViolation(err, "other_unique")).toBe(false);
+    expect(isUniqueViolation(wrapped({ code: "23503" }))).toBe(false);
+    expect(isUniqueViolation(undefined)).toBe(false);
+  });
+
+  it("reads a SQLSTATE two causes deep, which the old one-level copies missed", () => {
+    const twice = Object.assign(new Error("rethrown"), { cause: wrapped({ code: "23514" }) });
+    expect(pgCodeOf(twice)).toBe("23514");
   });
 });

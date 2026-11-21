@@ -3,7 +3,7 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
-import { isLegalHoldViolation, withTeam, type KobeTx } from "@kobe/db";
+import { isLegalHoldViolation, withTeam, type KobeTx, isUniqueViolation } from "@kobe/db";
 import {
   addProjectMemberRequestSchema,
   createProjectRequestSchema,
@@ -42,9 +42,9 @@ import {
   updateProject,
   type ProjectFailure,
 } from "../projects/repository.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { openUpload } from "../uploads/parse.js";
 import { DEFAULT_TEAM_MAX_OBJECTS, DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type ProjectContext = Context<{ Variables: TeamVariables }>;
 
@@ -114,13 +114,7 @@ const idParam = z.uuid();
 const SLUG_UNIQUE = "projects_slug_unique";
 
 function isSlugConflict(err: unknown): boolean {
-  const e = err as {
-    code?: string;
-    constraint?: string;
-    cause?: { code?: string; constraint?: string };
-  };
-  const cause = e.cause ?? e;
-  return cause.code === "23505" && cause.constraint === SLUG_UNIQUE;
+  return isUniqueViolation(err, SLUG_UNIQUE);
 }
 
 /**
@@ -149,7 +143,7 @@ export function projectRoutes(
     action: ProjectAction,
     fn: (tx: KobeTx, access: ProjectAccess) => Promise<Response>,
   ): Promise<Response> => {
-    const id = idParam.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParam);
     if (!id.success) return failure(c, "not_found");
     const viewer = viewerOf(c);
     try {
@@ -275,7 +269,7 @@ export function projectRoutes(
     });
   });
 
-  const memberParam = (c: ProjectContext) => idParam.safeParse(c.req.param("user_id"));
+  const memberParam = (c: ProjectContext) => param(c, "user_id", idParam);
 
   app.patch("/:id/members/:user_id", async (c) => {
     const body = await parseBody(c, updateProjectMemberRequestSchema);
@@ -343,7 +337,7 @@ export function projectRoutes(
     if (!body) return invalidRequest(c, "No file was sent.");
     // The permission is checked before a byte is read (404/403 first, then the stream).
     const viewer = viewerOf(c);
-    const id = idParam.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParam);
     if (!id.success) return failure(c, "not_found");
     const access = await withTeam(db, viewer.teamId, (tx) => loadAccess(tx, viewer, id.data));
     if (!access) return failure(c, "not_found");
@@ -378,7 +372,7 @@ export function projectRoutes(
 
   /** Add to project (KOBE-585; `projects/import.ts`): an artifact version or own file, copied. */
   app.post("/:id/files/import", async (c) => {
-    const id = idParam.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParam);
     if (!id.success) return failure(c, "not_found");
     const body = await parseBody(c, importProjectFileRequestSchema);
     if (!body) {
@@ -414,7 +408,7 @@ export function projectRoutes(
   });
 
   app.delete("/:id/files/:file_id", async (c) => {
-    const fileId = idParam.safeParse(c.req.param("file_id"));
+    const fileId = param(c, "file_id", idParam);
     if (!fileId.success) return failure(c, "not_found");
     let key: string | undefined;
     const res = await withProject(c, "edit", async (tx, access) => {

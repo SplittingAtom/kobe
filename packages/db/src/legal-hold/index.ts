@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { KobeDb, KobeTx } from "../client.js";
 import { legalHolds } from "../schema/legal-holds.js";
+import { pgCodeOf } from "../pg-errors.js";
 
 /**
  * Legal hold for purge jobs (spec D18, KOBE-17). A hold suspends every purge of a team's data, or
@@ -77,6 +78,5 @@ export async function legalHoldsForTeam(db: Executor, teamId: string): Promise<T
 
 /** Whether `err` is the database refusing to delete or erase held data. */
 export function isLegalHoldViolation(err: unknown): boolean {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return (e?.cause?.code ?? e?.code) === LEGAL_HOLD_SQLSTATE;
+  return pgCodeOf(err) === LEGAL_HOLD_SQLSTATE;
 }

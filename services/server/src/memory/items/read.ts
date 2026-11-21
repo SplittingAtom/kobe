@@ -1,4 +1,4 @@
-import { sql, type KobeDb } from "@kobe/db";
+import { sql, type KobeDb, makeCursorCodec } from "@kobe/db";
 import type {
   SemanticMemoryItemDetail,
   SemanticMemoryListQuery,
@@ -18,30 +18,19 @@ import {
 } from "./rows.js";
 import { staleSql } from "./stale.js";
 import { assertEnabled, type MemoryWho } from "./who.js";
+import { z } from "zod";
 
 /** Trigram similarity a search match needs when the words don't match (SM10 search). */
 const SEARCH_SIMILARITY = 0.3;
 
-interface Cursor {
-  readonly us: string;
-  readonly id: string;
-}
+/** Keyset position: the last item's change stamp (µs) and id. */
+export const itemCursor = makeCursorCodec(
+  z.object({ us: z.string().regex(/^\d{1,20}$/), id: z.string().regex(/^[0-9a-f-]{36}$/) }),
+);
 
-const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString("base64url");
-
-function decodeCursor(raw: string): Cursor {
-  try {
-    const c = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<Cursor>;
-    if (
-      typeof c.us === "string" &&
-      /^\d{1,20}$/.test(c.us) &&
-      typeof c.id === "string" &&
-      /^[0-9a-f-]{36}$/.test(c.id)
-    )
-      return { us: c.us, id: c.id };
-  } catch {
-    // fall through
-  }
+function decodeCursor(raw: string): { us: string; id: string } {
+  const cursor = itemCursor.decode(raw);
+  if (cursor) return { us: cursor.us, id: cursor.id };
   throw invalid("cursor is not one this list returned.");
 }
 
@@ -102,7 +91,7 @@ export function listItems(
       scope: q.scope,
       items: page.map((r) => itemToWire(loc, who, r, op.settings.stale_after_days)),
       next_cursor:
-        rows.length > q.limit && last ? encodeCursor({ us: last.stamp, id: last.id }) : null,
+        rows.length > q.limit && last ? itemCursor.encode({ us: last.stamp, id: last.id }) : null,
       usage: { count: await activeCount(tx, loc), max: scopeLimit(op.settings, loc), ...usage },
     };
   });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ServerDeps } from "../deps.js";
 import { deliverEgressRequestNotifications } from "./request-notify.js";
 import { decideEgressRequest, type DecideInput } from "./request-store.js";
+import { notFound } from "../http/request.js";
 
 /**
  * Body of a decision on an access request from the blocked card or the Site console (KOBE-602,
@@ -26,7 +27,7 @@ export async function decideAndRespond(
   const result = await decideEgressRequest(deps.database.db, input);
   switch (result.kind) {
     case "not_found":
-      return c.json({ code: "request_not_found", message: "That request does not exist." }, 404);
+      return notFound(c, "request_not_found", "That request does not exist.");
     case "site_admin_required":
       return c.json(
         {

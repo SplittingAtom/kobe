@@ -9,9 +9,9 @@ import {
 } from "../memory/proposals/decide.js";
 import { listMine, listQueue } from "../memory/proposals/list.js";
 import { repropose } from "../memory/proposals/propose.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { issueText, memoryRouteKit, refuseAgentWrites } from "./memory-items.js";
+import { invalidRequest } from "../http/request.js";
 
 /**
  * Workspace proposals (`/v1/memory/proposals`, KOBE-397, SM22) in the active Workspace. A member

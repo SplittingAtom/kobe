@@ -5,8 +5,8 @@ import { resolveAgentPin } from "../agents/versions.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { NIL_THREAD, effectiveSkillNames } from "../runs/effective-skills.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const draftQuerySchema = z.strictObject({ agent_id: uuidSchema.optional() });
 
@@ -58,7 +58,7 @@ export function threadSkillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   app.get("/:id/skills", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
     const names = await withTeam(db, viewer.teamId, async (tx) => {

@@ -9,7 +9,7 @@ import {
   type GrantSummary,
 } from "../connectors/grants.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const idSchema = z.uuid();
 
@@ -56,7 +56,7 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.put("/:connectorId", async (c) => {
-    const id = idSchema.safeParse(c.req.param("connectorId"));
+    const id = param(c, "connectorId", idSchema);
     if (!id.success) return notAvailable(c);
     const body = await parseBody(c, putGrantSchema);
     if (!body) {
@@ -91,16 +91,14 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.delete("/:connectorId", async (c) => {
-    const id = idSchema.safeParse(c.req.param("connectorId"));
+    const id = param(c, "connectorId", idSchema);
     if (!id.success) return notAvailable(c);
     const removed = await removeGrant(db, {
       teamId: c.get("team").id,
       userId: c.get("user").id,
       connectorId: id.data,
     });
-    return removed
-      ? c.body(null, 204)
-      : c.json({ code: "not_found", message: "No key stored." }, 404);
+    return removed ? c.body(null, 204) : notFound(c, "not_found", "No key stored.");
   });
 
   return app;

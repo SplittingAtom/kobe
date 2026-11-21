@@ -8,6 +8,7 @@ import {
   teams,
   type KobeDb,
   type TeamRole,
+  pgCodeOf,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { teamRoleSchema } from "../teams/schemas.js";
@@ -141,10 +142,6 @@ export type CreateMappingResult =
     };
 
 const UNIQUE_VIOLATION = "23505";
-const pgCode = (err: unknown): string | undefined => {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.cause?.code ?? e?.code;
-};
 
 /** Adds a mapping (audited `identity.sso.mapping.created`). */
 export async function createMapping(
@@ -192,7 +189,7 @@ export async function createMapping(
       };
     });
   } catch (err) {
-    if (pgCode(err) === UNIQUE_VIOLATION) return { ok: false, error: "mapping_exists" };
+    if (pgCodeOf(err) === UNIQUE_VIOLATION) return { ok: false, error: "mapping_exists" };
     throw err;
   }
 }

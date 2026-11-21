@@ -6,7 +6,6 @@ import { withTeam, type KobeTx } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import {
   decodeActivityCursor,
   encodeActivityCursor,
@@ -84,6 +83,7 @@ import { isModelEnabled } from "../models/team-store.js";
 import { fileThread, moveThread, setArchived, setPinned } from "../threads/organize.js";
 import { testChatStart } from "../skills/drafts/test-chat.js";
 import { chooseThreadAgent } from "../threads/choose-agent.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type ThreadContext = Context<{ Variables: TeamVariables }>;
 
@@ -198,7 +198,7 @@ async function readableEntries(
 }
 
 function threadIdParam(c: Context): string | undefined {
-  const parsed = uuidSchema.safeParse(c.req.param("id"));
+  const parsed = param(c, "id", uuidSchema);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -494,7 +494,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
    */
   app.get("/:id/entries/:entryId/output", async (c) => {
     const id = threadIdParam(c);
-    const entryId = entryIdSchema.safeParse(c.req.param("entryId"));
+    const entryId = param(c, "entryId", entryIdSchema);
     if (!id || !entryId.success) return invalidRequest(c);
     c.header("X-Content-Type-Options", "nosniff");
     const looked = await asViewer(c, async (tx, viewer) => {
@@ -595,7 +595,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   /** Label a node (CT9): owner only; `null` removes; idempotent, never activity, not audited. */
   app.put("/:id/labels/:entryId", async (c) => {
     const id = threadIdParam(c);
-    const entryId = entryIdSchema.safeParse(c.req.param("entryId"));
+    const entryId = param(c, "entryId", entryIdSchema);
     const body = await parseBody(c, setLabelBodySchema);
     if (!id || !entryId.success || !body) {
       return invalidRequest(c, "Give label: 1-60 characters on one line, or null to remove it.");

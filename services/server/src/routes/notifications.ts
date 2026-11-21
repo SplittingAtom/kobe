@@ -3,7 +3,7 @@ import { listNotificationsQuerySchema, markNotificationsReadBodySchema } from "@
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { decodeCursor, listNotifications, markNotificationsRead } from "../notifications/store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /**
  * Notifications (`/v1/notifications`, spec D32, KOBE-179; contract in KOBE-176): the caller's own

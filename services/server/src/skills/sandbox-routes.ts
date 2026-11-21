@@ -8,6 +8,7 @@ import type { BlobStore } from "../retention/blobs.js";
 import type { SandboxAuthenticator } from "../workspace-sync/auth.js";
 import { IntegrityError } from "../workspace-sync/object-store.js";
 import { PostgresSkillStore, type SkillStore } from "./skill-store.js";
+import { param } from "../http/request.js";
 
 /** Bundle downloads per sandbox: a run start fetches at most a few dozen, then a steady trickle. */
 export const SKILL_FETCH_RATE = { capacity: 200, refillPerSecond: 20 } as const;
@@ -52,7 +53,7 @@ export function skillSandboxRoutes(deps: SkillSandboxRoutesDeps): Hono {
         "retry-after": String(Math.ceil(wait / 1000)),
       });
     }
-    const hash = sha256HexSchema.safeParse(c.req.param("sha256"));
+    const hash = param(c, "sha256", sha256HexSchema);
     if (!hash.success) return notFound();
     const found = await store.openSandboxBundle(caller, hash.data);
     if (!found.ok && found.error === "not_found") return notFound();

@@ -39,7 +39,7 @@ import {
   type WorkspaceMemorySwitches,
 } from "../memory/switches.js";
 import { isModelEnabled } from "../models/team-store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /** Runs the middlewares in order, then `next` (a response from one of them ends the chain). */
 const chain =

@@ -2,7 +2,6 @@ import {
   CanonicalJsonError,
   canonicalJson,
   isActiveRunStatus,
-  type JsonObject,
   type PolicyReason,
 } from "@kobe/protocol";
 import { SYSTEM_ACTOR, pgCodeOf, sql, withTeam, type KobeTx } from "@kobe/db";
@@ -15,6 +14,7 @@ import type { ApprovalBroker, ApprovalOutcome, ApprovalRequest } from "../sandbo
 import type { ApprovalContext } from "./context.js";
 import { expireAborted, expireByTtl } from "./expiry.js";
 import { insertPendingApproval, loadApproval, tokenOf, type ApprovalRow } from "./store.js";
+import { parseCanonicalInput } from "./canonical-input.js";
 
 /**
  * The approval broker (KOBE-37; `ApprovalBroker` seam of the sandbox wire, KOBE-24). For a
@@ -270,7 +270,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
         await this.#reject(tx, req, "replayed_tool_call_id", taken);
         return { kind: "replay" as const };
       }
-      const input = JSON.parse(canonical) as JsonObject;
+      const input = parseCanonicalInput({ inputCanonical: canonical });
       // KOBE-623: a Kobe admin write's card says what changes, by name, and where.
       const admin = isKobeAdminAsk(req.decision.reasons)
         ? await kobeAdminApprovalCard(tx, teamId, req.tool, input)

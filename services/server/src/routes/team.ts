@@ -5,9 +5,10 @@ import type { ServerDeps } from "../deps.js";
 import { isWorkspaceSteward } from "../memory/stewards.js";
 import { listTeamMappings } from "../sso/mappings.js";
 import { afterMemberRemoved, afterMemberRoleChanged } from "../teams/after-change.js";
-import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
+import { membershipError } from "../teams/http.js";
 import { listMembers, removeMember, setMemberRole, takeOverMember } from "../teams/members.js";
 import { idSchema, memberRoleSchema, teamRoleSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 /**
  * The active team (`/v1/team`, spec §6.1): who you are in it and its membership (D8). People join
@@ -36,7 +37,7 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   );
 
   app.patch("/members/:userId", requireTeamPermission("team.members.manage"), async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     const body = await parseBody(c, memberRoleSchema);
     if (!userId.success || !body) return invalidRequest(c);
     const result = await setMemberRole(
@@ -52,7 +53,7 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   });
 
   app.delete("/members/:userId", requireTeamPermission("team.members.manage"), async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     // `?expectedRole=` (KOBE-621): remove only while the member still has this role (the before-state
     // a Kobe MCP removal was approved with), checked under the change's row lock.
     const expectedRaw = c.req.query("expectedRole");
@@ -71,7 +72,7 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     "/members/:userId/take-over",
     requireTeamPermission("team.members.manage"),
     async (c) => {
-      const userId = idSchema.safeParse(c.req.param("userId"));
+      const userId = param(c, "userId", idSchema);
       if (!userId.success) return invalidRequest(c);
       // A mapped team admin can't free their own row from the IdP (review finding 4): another team
       // admin takes it over, or the IdP removes the mapping.
@@ -95,7 +96,7 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   app.get("/sso-mappings", requireTeamPermission("team.members.manage"), async (c) =>
     deps.sso.settings.enabled
       ? c.json({ mappings: await listTeamMappings(db, c.get("team").id) })
-      : c.json({ code: "not_found", message: "Not found." }, 404),
+      : notFound(c, "not_found", "Not found."),
   );
 
   return app;

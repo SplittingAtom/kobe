@@ -4,13 +4,13 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { events, schedules, teams, threads, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-172: schedules (team table), fire dedup on events, threads.schedule_id. */
 let app: KobeDatabase;
 const teamA = randomUUID();
 const teamB = randomUUID();
 const userId = randomUUID();
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 
 const row = (teamId: string, id = randomUUID()) => ({
   teamId,
@@ -51,7 +51,7 @@ describe("schedules", () => {
     expect(await withTeam(app.db, teamB, (tx) => tx.select().from(schedules))).toEqual([]);
     await expect(
       withTeam(app.db, teamB, (tx) => tx.insert(schedules).values(row(teamA))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "42501");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "42501");
   });
 
   it("rejects an unknown paused_by and a blank prompt", async () => {
@@ -59,10 +59,10 @@ describe("schedules", () => {
       withTeam(app.db, teamA, (tx) =>
         tx.insert(schedules).values({ ...row(teamA), pausedBy: "nobody" as "team_admin" }),
       ),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
     await expect(
       withTeam(app.db, teamA, (tx) => tx.insert(schedules).values({ ...row(teamA), prompt: " " })),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
   });
 
   it("rejects a fire without a schedule id or due time, so NULLs cannot dodge the index", async () => {
@@ -72,7 +72,7 @@ describe("schedules", () => {
     for (const bad of [noId, noDue]) {
       await expect(
         withTeam(app.db, teamA, (tx) => tx.insert(events).values(bad)),
-      ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+      ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
     }
   });
 
@@ -84,7 +84,7 @@ describe("schedules", () => {
       withTeam(app.db, teamA, (tx) =>
         tx.insert(events).values(fire(teamA, sid.toUpperCase(), due)),
       ),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23505");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23505");
   });
 
   it("rejects a duplicate (schedule_id, due_at) schedule.fire event", async () => {
@@ -93,7 +93,7 @@ describe("schedules", () => {
     await withTeam(app.db, teamA, (tx) => tx.insert(events).values(fire(teamA, sid, due)));
     await expect(
       withTeam(app.db, teamA, (tx) => tx.insert(events).values(fire(teamA, sid, due))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23505");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23505");
     // Another occurrence, another schedule, or another kind is fine.
     await withTeam(app.db, teamA, (tx) =>
       tx
@@ -124,7 +124,7 @@ describe("threads.schedule_id", () => {
       withTeam(app.db, teamB, (tx) =>
         tx.insert(threads).values({ teamId: teamB, ownerUserId: userId, scheduleId: sid }),
       ),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23503");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23503");
     await withTeam(app.db, teamA, (tx) => tx.delete(schedules).where(eq(schedules.id, sid)));
     const [after] = await withTeam(app.db, teamA, (tx) =>
       tx.select().from(threads).where(eq(threads.id, t.id)),

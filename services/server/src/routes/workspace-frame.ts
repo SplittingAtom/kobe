@@ -6,13 +6,14 @@ import { recordAudit } from "../audit/record.js";
 import type { TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { mayLoadFrame, workspaceFrameDocument } from "../artifacts/frame-document.js";
-import { FRAME_HEADERS, readCappedBody } from "../artifacts/serve.js";
+import { FRAME_HEADERS } from "../artifacts/serve.js";
 import { logger } from "../logger.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { isInternalPath } from "../workspace-files/paths.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { CONTENT_MISSING, reportMissingContent } from "../workspace-sync/lost.js";
 import { currentEntry } from "../workspace-sync/store.js";
+import { readCappedStream } from "../http/read-capped.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -92,8 +93,8 @@ export function registerWorkspaceFrame(
         object.body.destroy();
         return tooLarge(c);
       }
-      const bytes = await readCappedBody(object.body, WORKSPACE_FRAME_MAX_BYTES);
-      if (bytes === "too_large") return tooLarge(c);
+      const bytes = await readCappedStream(object.body, WORKSPACE_FRAME_MAX_BYTES);
+      if (bytes === undefined) return tooLarge(c);
       return new Response(workspaceFrameDocument(bytes), { headers: FRAME_HEADERS });
     } catch (err) {
       logger.error({ err, teamId: owner.teamId }, "workspace frame unreadable");

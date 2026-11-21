@@ -1,13 +1,14 @@
 import type { Context, Hono } from "hono";
 import type { KobeDb } from "@kobe/db";
 import { recordAuditAfter } from "../../audit/record.js";
-import { forbidden, invalidRequest, notFound, publishError } from "../http.js";
+import { forbidden, notFound, publishError } from "../http.js";
 import { versionParamSchema } from "../schemas.js";
 import { getVersion } from "../versions.js";
 import { guardUnreadable, type ResolvedAgent } from "../version-routes.js";
 import { mapAgentVersionToOrbit, orbitExportToYaml, type OrbitExport } from "./orbit-export.js";
 import { orbitMcpToolNames } from "./mcp-tools.js";
 import { listOrbitModelOptions, resolveOrbitModel } from "./model.js";
+import { invalidRequest, param } from "../../http/request.js";
 
 export interface OrbitRouteOptions {
   readonly db: KobeDb;
@@ -35,7 +36,7 @@ export function mountOrbitExport<E extends { Variables: object }>(
   app.get("/:id/versions/:version/orbit", async (c) => {
     const found = await options.resolve(c);
     if (!found) return notFound(c);
-    const version = versionParamSchema.safeParse(c.req.param("version"));
+    const version = param(c, "version", versionParamSchema);
     if (!version.success) return invalidRequest(c, "The version must be a positive number.");
     if (!found.access.readDefinition) {
       return forbidden(c, "Your team role doesn't allow exporting team agents.");

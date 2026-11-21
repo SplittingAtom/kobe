@@ -16,10 +16,10 @@ import {
   toAnswerFeedback,
   type FeedbackError,
 } from "../feedback/store.js";
-import { parseBody } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import type { Viewer } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -75,7 +75,7 @@ export function runFeedbackRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
       onError: (c) => feedbackError(c, "invalid_request"),
     }),
     async (c) => {
-      const id = uuidSchema.safeParse(c.req.param("id"));
+      const id = param(c, "id", uuidSchema);
       if (!id.success) return feedbackError(c, "run_not_found");
       const body = await parseBody(c, putFeedbackBodySchema);
       if (!body) return feedbackError(c, "invalid_request");
@@ -87,7 +87,7 @@ export function runFeedbackRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   );
 
   app.delete("/:id/feedback", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return feedbackError(c, "run_not_found");
     const cleared = await asViewer(deps, c, (tx, viewer) => clearRating(tx, viewer, id.data));
     if (cleared !== null) deps.feedbackScores?.enqueue(c.get("team").id, cleared);
@@ -103,7 +103,7 @@ export function threadFeedbackRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
   app.get("/:id/feedback", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return feedbackError(c, "thread_not_found");
     const result = await asViewer(deps, c, (tx, viewer) => threadFeedback(tx, viewer, id.data));
     if (!result.ok) return feedbackError(c, result.error);

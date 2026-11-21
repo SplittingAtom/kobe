@@ -32,8 +32,8 @@ import {
   type MemoryTarget,
 } from "../memory/store.js";
 import type { BlobStore } from "../retention/blobs.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param, readJson } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -197,7 +197,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   });
 
   app.put("/", async (c) => {
-    const parsed = memoryPutRequestSchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = memoryPutRequestSchema.safeParse(await readJson(c, null));
     if (!parsed.success) return invalidRequest(c);
     const body = parsed.data;
     return run(c, async (tx, blobs) => {
@@ -246,7 +246,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   });
 
   app.get("/:id", (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     return run(c, async (tx, blobs) => {
       const doc = await resolveDoc(tx, c, id.data);
@@ -257,7 +257,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   });
 
   app.delete("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const res = await run(c, async (tx) => {
       const doc = await resolveDoc(tx, c, id.data, true);
@@ -276,8 +276,8 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   });
 
   app.post("/:id/restore", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
-    const body = memoryRestoreRequestSchema.safeParse(await c.req.json().catch(() => null));
+    const id = param(c, "id", uuidSchema);
+    const body = memoryRestoreRequestSchema.safeParse(await readJson(c, null));
     if (!id.success || !body.success) return invalidRequest(c);
     return run(c, async (tx, blobs) => {
       const doc = await resolveDoc(tx, c, id.data, true);

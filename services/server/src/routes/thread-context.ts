@@ -18,10 +18,10 @@ import { logger } from "../logger.js";
 import { readThreadMemories } from "../memory/items/run-records.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { SandboxWakeError } from "../sandbox-wire/types.js";
-import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const NOT_FOUND = { code: "thread_not_found", message: "No thread with that id." };
 /** How soon the web asks again while the sandbox wakes. */
@@ -98,7 +98,7 @@ export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
    * latest run with records was given (no sandbox involved). Owner only (CV2).
    */
   app.get("/:id/context/memories", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -122,7 +122,7 @@ export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
   });
 
   app.get("/:id/context", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     // Read per request: building the app touches no dependency a route may not need (KOBE-14).
     const db = deps.database.db;

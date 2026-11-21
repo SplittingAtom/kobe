@@ -9,10 +9,10 @@ import {
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { readLearnState } from "../memory/learn/state.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import type { Viewer } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const NOT_FOUND: LearnRefusal = { code: "thread_not_found", message: "Thread not found." };
 const READ_ONLY: LearnRefusal = {
@@ -48,7 +48,7 @@ export function threadLearnRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   };
 
   app.get("/:id/learn", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, "The thread id is not a uuid.");
     const result = await readLearnState(db, await viewerOf(c), id.data, {
       serverCalls: deps.learningPasses.serverCalls,
@@ -59,7 +59,7 @@ export function threadLearnRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   app.post("/:id/learn", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     const body = await parseBody(c, learnStartRequestSchema);
     if (!id.success || !body) return invalidRequest(c, 'Send {"mode": "new"} or {"mode": "all"}.');
     const started = await deps.learningPasses.start(await viewerOf(c), id.data, {

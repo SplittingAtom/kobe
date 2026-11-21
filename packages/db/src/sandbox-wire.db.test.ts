@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { runs, sandboxCommands, sandboxRunLeases, teams, threads, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Sandbox wire schema (KOBE-24): the durable inbound cursor `runs.sandbox_seq` and the team-scoped
@@ -36,8 +37,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 async function newRun(

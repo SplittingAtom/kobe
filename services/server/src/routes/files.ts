@@ -6,11 +6,11 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
 import { threadKey } from "../retention/blobs.js";
-import { invalidRequest } from "../teams/http.js";
 import { findThread, type Viewer } from "../threads/repository.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { attachmentDisposition } from "../workspace-files/paths.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const NOT_FOUND = { code: "file_not_found", message: "No file with that id." } as const;
 
@@ -44,7 +44,7 @@ export function fileRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     });
 
   app.get("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const row = await readable(c.get("team").id, c.get("user").id, id.data);
     if (!row) return c.json(NOT_FOUND, 404);
@@ -61,7 +61,7 @@ export function fileRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   });
 
   app.get("/:id/content", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const row = await readable(teamId, c.get("user").id, id.data);

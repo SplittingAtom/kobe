@@ -20,7 +20,7 @@ import {
   listMemberRules,
   listUserRules,
 } from "../policy/user-rules.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /**
  * Team tool policy (`/v1/team/policy`, spec D6, D8, D29). Every member can read the team's rules

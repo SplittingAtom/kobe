@@ -9,7 +9,7 @@ import { setTeamSkillAccess } from "../skills/access.js";
 import { MAX_OFFERED_SKILLS, agentNames, setOfferToAll, skillReach } from "../skills/reach.js";
 import { findSkill, type SkillLocation, type SkillRecord } from "../skills/store.js";
 import { skillUsageInTx } from "../skills/usage.js";
-import { parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -40,7 +40,7 @@ export function skillReachRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
 
   /** The skill, team first, then the caller's personal one (as `skills.ts` `visible`). */
   async function visible(c: Ctx): Promise<SkillRecord | null> {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return null;
     const locations: SkillLocation[] = [
       { scope: "team", teamId: c.get("team").id },
@@ -65,8 +65,7 @@ export function skillReachRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     if (!teamRoleAllows(c.get("team").role, "team.skills.review"))
       return c.json({ code: "forbidden", message: "Only team admins can change this." }, 403);
     const body = await parseBody(c, offerSchema);
-    if (!body)
-      return c.json({ code: "invalid_request", message: "Send offerToAll: true or false." }, 400);
+    if (!body) return invalidRequest(c, "Send offerToAll: true or false.");
     const skill = await visible(c);
     if (!skill || skill.scope !== "team") return notFound(c);
     const result = await setOfferToAll(db, c.get("team").id, skill.id, body.offerToAll);

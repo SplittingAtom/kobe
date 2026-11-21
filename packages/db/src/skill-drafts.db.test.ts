@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { SKILL_DRAFT_MAX_BYTES, skillDraftFiles, skillDrafts } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Workbench drafts in the database (KOBE-320, SK11): one content column per file; the draft's
@@ -65,8 +66,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 async function newDraft(teamId = teamA, name = "demo", by = alice): Promise<string> {

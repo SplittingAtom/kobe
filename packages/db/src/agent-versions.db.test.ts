@@ -12,6 +12,7 @@ import {
   users,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Published agent versions and thread pins (KOBE-46, D19): versions are immutable in the database,
@@ -49,8 +50,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 const version = (n: number, extra: Partial<typeof teamAgentVersions.$inferInsert> = {}) => ({

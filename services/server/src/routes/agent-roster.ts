@@ -27,8 +27,8 @@ import { requireSitePermission, requireTeam, type TeamVariables } from "../authz
 import { siteRoleAllows, teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { parseBody } from "../teams/http.js";
 import { mountSiteAdopt, mountTeamAdopt } from "./agent-transfer.js";
+import { param, parseBody } from "../http/request.js";
 
 /**
  * Agent roster routes (KOBE-566, spec agents-roster AR16 without fork, transfer and adopt):
@@ -105,7 +105,7 @@ export function mountAgentRosterRoutes(
   });
 
   app.post("/:id/assignments", async (c) => {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     const body = await parseBody(c, assignAgentRequestSchema);
     if (!body)
       return rosterError(
@@ -128,8 +128,8 @@ export function mountAgentRosterRoutes(
   });
 
   app.delete("/:id/assignments/:target", async (c) => {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
-    const target = agentRosterTargetSchema.safeParse(c.req.param("target"));
+    const id = param(c, "id", agentIdSchema);
+    const target = param(c, "target", agentRosterTargetSchema);
     if (!target.success) return rosterError(c, "invalid_request", "target must be team or site.");
     // The owner may withdraw from another team's roster (one they left): `?teamId=`.
     const teamId = uuidQuery.safeParse(c.req.query("teamId"));
@@ -157,7 +157,7 @@ async function readAdminUpdate(
   deps: ServerDeps,
   target: RosterTarget,
 ): Promise<AdminUpdate | Response> {
-  const id = agentIdSchema.safeParse(c.req.param("agentId"));
+  const id = param(c, "agentId", agentIdSchema);
   const body = await parseBody(c, updateAgentRosterEntryRequestSchema);
   if (!body) {
     return rosterError(

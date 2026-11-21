@@ -8,6 +8,7 @@
 export const PG_LOCK_NOT_AVAILABLE = "55P03";
 export const PG_DEADLOCK_DETECTED = "40P01";
 export const PG_FOREIGN_KEY_VIOLATION = "23503";
+export const PG_UNIQUE_VIOLATION = "23505";
 
 interface PgErrorFields {
   readonly code: string;
@@ -52,4 +53,12 @@ export function isLockConflict(err: unknown): boolean {
 export function isForeignKeyViolation(err: unknown, constraint: string): boolean {
   const pg = pgErrorOf(err);
   return pg?.code === PG_FOREIGN_KEY_VIOLATION && pg.constraint === constraint;
+}
+
+/** A unique violation (23505), on `constraint` when one is given. */
+export function isUniqueViolation(err: unknown, constraint?: string): boolean {
+  const pg = pgErrorOf(err);
+  return (
+    pg?.code === PG_UNIQUE_VIOLATION && (constraint === undefined || pg.constraint === constraint)
+  );
 }

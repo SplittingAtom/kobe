@@ -8,10 +8,10 @@ import {
   listWorkspaceConflicts,
   settleConflict,
 } from "../sync-conflicts/store.js";
-import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param, readJson } from "../http/request.js";
 
 const NOT_FOUND = { code: "thread_not_found", message: "No thread with that id." };
 const CONFLICT_NOT_FOUND = { code: "conflict_not_found", message: "No such sync conflict." };
@@ -31,7 +31,7 @@ export function threadSyncConflictRoutes(deps: ServerDeps): Hono<{ Variables: Te
   app.use(requireTeamPermission("team.chat"));
 
   app.get("/:id/sync-conflicts", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -48,9 +48,9 @@ export function threadSyncConflictRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.post("/:id/sync-conflicts/:conflictId", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
-    const conflictId = uuidSchema.safeParse(c.req.param("conflictId"));
-    const body = syncConflictActionBodySchema.safeParse(await c.req.json().catch(() => null));
+    const id = param(c, "id", uuidSchema);
+    const conflictId = param(c, "conflictId", uuidSchema);
+    const body = syncConflictActionBodySchema.safeParse(await readJson(c, null));
     if (!id.success || !conflictId.success || !body.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -97,8 +97,8 @@ export function workspaceSyncConflictRoutes(deps: ServerDeps): Hono<{ Variables:
   });
 
   app.post("/sync-conflicts/:conflictId", async (c) => {
-    const conflictId = uuidSchema.safeParse(c.req.param("conflictId"));
-    const body = syncConflictActionBodySchema.safeParse(await c.req.json().catch(() => null));
+    const conflictId = param(c, "conflictId", uuidSchema);
+    const body = syncConflictActionBodySchema.safeParse(await readJson(c, null));
     if (!conflictId.success || !body.success) return invalidRequest(c);
     const owner = { teamId: c.get("team").id, userId: c.get("user").id };
     const settled = await withTeam(db, owner.teamId, (tx) =>

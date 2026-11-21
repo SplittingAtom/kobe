@@ -3,7 +3,6 @@ import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { CATALOG_SORTS, browseCatalog, catalogDetail } from "../skills/catalog-browse.js";
-import { invalidRequest } from "../teams/http.js";
 import { exportCatalogVersion, type CatalogExportResult } from "../skills/catalog-export.js";
 import { SKILL_EXPORT_RATE, exportResponse } from "../skills/export.js";
 import { hitRateLimit } from "../rate-limit.js";
@@ -12,6 +11,7 @@ import {
   notifyTeamAdmins,
   requestForTeam,
 } from "../skills/skill-install-requests.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const querySchema = z.object({
   q: z.string().max(200).optional(),
@@ -47,7 +47,7 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
   });
 
   app.get("/:skillId", requireTeamPermission("team.read"), async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const notFound = { code: "not_found", message: "No such catalog skill." };
     if (!id.success) return c.json(notFound, 404);
     const who = {
@@ -62,7 +62,7 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
 
   // A catalog version's portable export (KOBE-345): members of a team that hasn't blocked it.
   app.get("/:skillId/versions/:semver/export", requireTeamPermission("team.read"), async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const semver = c.req.param("semver");
     const format = z.enum(["portable", "portable_evals"]).safeParse(c.req.query("format"));
     if (!format.success)
@@ -89,7 +89,7 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
 
   // Request for team (KOBE-338, SK25): asks this team's admins to install the skill.
   app.post("/:skillId/request", requireTeamPermission("team.read"), async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     if (!id.success) return c.json({ code: "not_found", message: "No such catalog skill." }, 404);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;

@@ -11,6 +11,7 @@ import {
   users,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Skill bundles (KOBE-78): versions are immutable in the database, a skill with versions can't be
@@ -43,8 +44,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 const version = (n: number) => ({

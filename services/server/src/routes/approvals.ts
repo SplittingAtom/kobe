@@ -1,28 +1,13 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
-import {
-  approvalResolutionBodySchema,
-  approveAllBodySchema,
-  type ActorContext,
-} from "@kobe/protocol";
+import { approvalResolutionBodySchema, approveAllBodySchema } from "@kobe/protocol";
 import { ApprovalError } from "../approvals/index.js";
 import { approvalListQuerySchema } from "../approvals/view.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
-
-type ApprovalContext = Context<{ Variables: TeamVariables }>;
-
-function actorOf(c: ApprovalContext): ActorContext {
-  const team = c.get("team");
-  return {
-    user_id: c.get("user").id,
-    team_id: team.id,
-    site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
-  };
-}
+import { actorOf } from "../authz/actor.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 async function answer(c: Context, fn: () => Promise<Response>): Promise<Response> {
   try {
@@ -68,7 +53,7 @@ export function approvalRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   app.get("/:id/remember", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     return answer(c, async () => c.json(await deps.approvals.rememberOptions(actorOf(c), id.data)));
   });
@@ -82,13 +67,13 @@ export function approvalRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   app.get("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     return answer(c, async () => c.json(await deps.approvals.get(actorOf(c), id.data)));
   });
 
   app.post("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     const body = await parseBody(c, approvalResolutionBodySchema);
     if (!id.success || !body) {
       return invalidRequest(c, "Give decision (allow or deny) and optionally remember.");

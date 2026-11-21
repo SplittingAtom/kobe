@@ -13,8 +13,8 @@ import {
 } from "../invitations/site-invites.js";
 import { mailSiteInvite } from "../invitations/notify.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const inviteSchema = z.object({ email: z.email().max(254) }).strict();
 
@@ -80,7 +80,7 @@ export function siteInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
   });
 
   app.post("/:id/resend", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return invalidRequest(c);
     const me = c.get("user");
     const email = await findOpenInviteEmail(db, id.data);
@@ -96,7 +96,7 @@ export function siteInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
   });
 
   app.delete("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return invalidRequest(c);
     // `?expectedEmail=` (KOBE-623): revoke only while the invitation is still for that address.
     const expected = c.req.query("expectedEmail");

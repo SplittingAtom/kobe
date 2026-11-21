@@ -18,6 +18,7 @@ import {
   teams,
   type KobeDb,
   type KobeTx,
+  pgCodeOf,
 } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { logger } from "../../logger.js";
@@ -198,12 +199,6 @@ export type RegistryTeamResult =
       readonly message: string;
     };
 
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: unknown; cause?: { code?: unknown } };
-  const code = e.cause?.code ?? e.code;
-  return typeof code === "string" ? code : undefined;
-}
-
 /**
  * Creates the dedicated Registry team (review H1): flagged `registry`, the creating Site admin its
  * team admin (they review anyway, SK21), every active Skill reviewer a member (`added_via` the
@@ -235,7 +230,7 @@ export async function createRegistryTeam(
       },
     );
   } catch (err) {
-    if (pgCode(err) !== "23505") throw err;
+    if (pgCodeOf(err) !== "23505") throw err;
     const exists = (await registryTeamFor(db)) !== null;
     return exists
       ? { ok: false, code: "registry_exists", message: "The Registry team already exists." }

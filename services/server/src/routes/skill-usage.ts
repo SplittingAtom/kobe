@@ -7,6 +7,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { usageSnapshot, viewerTeamsOf } from "../skills/usage-snapshot.js";
 import { siteSkillUsage, teamSkillUsage } from "../skills/usage-views.js";
+import { param } from "../http/request.js";
 
 const idSchema = z.uuid();
 
@@ -28,7 +29,7 @@ export function skillUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
   app.get("/:skillId/usage", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const missing = { code: "not_found", message: "No such catalog skill." };
     if (!id.success) return c.json(missing, 404);
     if (hasQuery(c)) return c.json(FIXED, 400);

@@ -31,7 +31,7 @@ import {
   versionRow,
   type VersionRow,
 } from "../skills/registry/review-queue.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
@@ -104,7 +104,7 @@ export function registryReviewRoutes(
   };
 
   const versionId = (c: Ctx) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     return id.success ? id.data : null;
   };
 
@@ -137,7 +137,7 @@ export function registryReviewRoutes(
       const bytes = await versionBytes(deps.blobs, v, approved);
       if (!bytes) return c.json(MISSING, 409);
       const file = diffOneFile(bytes.before, bytes.after, path);
-      return file ? c.json(file) : c.json({ code: "not_found", message: "No such file." }, 404);
+      return file ? c.json(file) : notFound(c, "not_found", "No such file.");
     }
     const diff = await versionDiff(deps.blobs, v, approved);
     if (!diff) return c.json(MISSING, 409);
@@ -157,7 +157,7 @@ export function registryReviewRoutes(
     const bytes = await versionBytes(deps.blobs, v, undefined);
     if (!bytes) return c.json(MISSING, 409);
     const file = rawFile(bytes.after, path);
-    return file ? c.json(file) : c.json({ code: "not_found", message: "No such file." }, 404);
+    return file ? c.json(file) : notFound(c, "not_found", "No such file.");
   });
 
   app.post("/:id/claim", requireSkillReview(deps, "claim"), async (c) => {
@@ -199,7 +199,7 @@ export function registryReviewRoutes(
   // Cancel one re-run (eligible reviewers only; the history keeps it, review-335 M3).
   app.post("/:id/reruns/:evalRunId/cancel", requireSkillReview(deps, "rerun"), async (c) => {
     const id = versionId(c);
-    const run = idSchema.safeParse(c.req.param("evalRunId"));
+    const run = param(c, "evalRunId", idSchema);
     if (!id || !run.success) return c.json(NOT_FOUND, 404);
     const r = await cancelRerun(db, id, run.data, c.get("user").id);
     if (!r.ok) return c.json({ code: r.code, message: r.message }, r.status);

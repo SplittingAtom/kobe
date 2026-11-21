@@ -8,7 +8,6 @@ import {
   readRegistrySettings,
   updateRegistrySettings,
 } from "../skills/registry/settings.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { similarCatalogNames } from "../skills/registry/names-db.js";
 import { registryReviewRoutes } from "./site-skill-registry-review.js";
 import { z } from "zod";
@@ -17,6 +16,7 @@ import { CATALOG_PACKAGE_RATE, SKILL_EXPORT_RATE, exportResponse } from "../skil
 import { hitRateLimit } from "../rate-limit.js";
 import { catalogExportRefusal } from "./skill-catalog.js";
 import { siteSkillMirrorRoutes, type SkillMirrorHandle } from "./site-skill-mirror.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 /**
  * Registry settings (`/v1/site/skills/registry/settings`, KOBE-330, SK20, SK21): Site Owner and
@@ -73,12 +73,11 @@ export function siteSkillRegistryRoutes(
     "/versions/:id/export",
     requireSitePermission("site.skills.catalog.manage"),
     async (c) => {
-      const id = z.uuid().safeParse(c.req.param("id"));
+      const id = param(c, "id", z.uuid());
       const format = z
         .enum(["package", "portable", "portable_evals"])
         .safeParse(c.req.query("format") ?? "package");
-      if (!id.success)
-        return c.json({ code: "not_found", message: "No such catalog version." }, 404);
+      if (!id.success) return notFound(c, "not_found", "No such catalog version.");
       if (!format.success)
         return invalidRequest(c, "Give format=package, portable or portable_evals.");
       const rule = format.data === "package" ? CATALOG_PACKAGE_RATE : SKILL_EXPORT_RATE;

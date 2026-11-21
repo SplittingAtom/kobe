@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { connectorGrants, connectors, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-108: per-user connector grants, a team table whose secret is stored sealed. */
 let app: KobeDatabase;
@@ -20,7 +21,6 @@ const row = (teamId: string, sealed = "e1.kid.a.b.c.d.e.f") => ({
   keyId: "kid",
   hint: "••••1234",
 });
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 
 beforeAll(async () => {
   const owner = createDb(inject("ownerUrl"));
@@ -47,7 +47,7 @@ describe("connector_grants", () => {
     expect(fromB).toEqual([]);
     await expect(
       withTeam(app.db, teamB, (tx) => tx.insert(connectorGrants).values(row(teamA))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "42501");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "42501");
     const del = await withTeam(app.db, teamB, (tx) =>
       tx.delete(connectorGrants).where(eq(connectorGrants.connectorId, connectorId)).returning(),
     );
@@ -64,7 +64,7 @@ describe("connector_grants", () => {
   it("allows one grant per (team, user, connector)", async () => {
     await expect(
       withTeam(app.db, teamA, (tx) => tx.insert(connectorGrants).values(row(teamA))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23505");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23505");
   });
 
   it.each([
@@ -74,7 +74,7 @@ describe("connector_grants", () => {
   ])("refuses a secret that is not envelope text (%s)", async (_n, sealed) => {
     await expect(
       withTeam(app.db, teamB, (tx) => tx.insert(connectorGrants).values(row(teamB, sealed))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
   });
 
   it("accepts the oauth kind with an expiry, and refuses an unknown kind", async () => {
@@ -95,7 +95,7 @@ describe("connector_grants", () => {
           .insert(connectorGrants)
           .values({ ...oauth, userId: userId, connectorId, kind: "saml" as never }),
       ),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
   });
 
   it("has no break-glass policy", async () => {

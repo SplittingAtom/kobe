@@ -16,6 +16,7 @@ import { resumeIfNoneWaiting } from "./expiry.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "./run-end.js";
 import { loadApproval, type ApprovalRow } from "./store.js";
 import { viewOf, type ApprovalView } from "./view.js";
+import { parseCanonicalInput } from "./canonical-input.js";
 
 /**
  * Whether a waiting call may be allowed together with others ("Approve all waiting", KOBE-289
@@ -32,7 +33,7 @@ export function batchable(
     !isViewedFileAsk(row.reasons) &&
     // KOBE-619: a Kobe admin change is approved on its own, every time.
     !isKobeAdminAsk(row.reasons) &&
-    !isProjectWrite(row.tool, JSON.parse(row.inputCanonical) as unknown) &&
+    !isProjectWrite(row.tool, parseCanonicalInput(row)) &&
     tool !== undefined &&
     tool.name === row.tool &&
     row.risk !== "destructive" &&

@@ -13,6 +13,7 @@ import {
 import type { AgentAccess } from "./access.js";
 import type { AgentRecord, CreateError } from "./store.js";
 import type { AgentVersionRecord, AgentVersionSummary, PublishError } from "./versions.js";
+import { invalidRequest, readJson } from "../http/request.js";
 
 /**
  * HTTP plumbing shared by the team (`/v1/agents`) and gallery (`/v1/site/gallery/agents`)
@@ -62,7 +63,7 @@ export async function readAgentInput(c: Context): Promise<AgentInput> {
       ),
     };
   }
-  const body: unknown = await c.req.json().catch(() => null);
+  const body: unknown = await readJson(c, null);
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, response: invalidRequest(c, "Send a JSON object.") };
   }
@@ -183,10 +184,6 @@ export function exportResponse(c: Context, agent: AgentRecord) {
     "x-content-type-options": "nosniff",
     etag: etag(agent),
   });
-}
-
-export function invalidRequest(c: Context, message = "Check the request and try again.") {
-  return c.json({ code: "invalid_request", message }, 400);
 }
 
 export function invalidAgent(c: Context, issues: readonly AgentFileIssue[]) {

@@ -8,8 +8,8 @@ import {
   listTeamConnectors,
   setTeamConnector,
 } from "../connectors/team-store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { readKobeTeamConnector, setKobeTeamLevel } from "../kobe-mcp/switches.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const exposureSchema = z.enum(["read_only", "all", "custom"]);
 
@@ -85,7 +85,7 @@ export function teamConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.put("/:id", requireTeamPermission("team.connectors.manage"), async (c) => {
-    const id = z.uuid().safeParse(c.req.param("id"));
+    const id = param(c, "id", z.uuid());
     if (!id.success) return c.json(notFound(), 404);
     const body = await parseBody(c, bodySchema);
     if (!body) {
@@ -111,7 +111,7 @@ export function teamConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.delete("/:id", requireTeamPermission("team.connectors.manage"), async (c) => {
-    const id = z.uuid().safeParse(c.req.param("id"));
+    const id = param(c, "id", z.uuid());
     if (!id.success) return c.json(notFound(), 404);
     // `?expectedExposure=` (KOBE-621): disable only while the exposure is still this one.
     const expectedRaw = c.req.query("expectedExposure");

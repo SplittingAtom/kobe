@@ -14,8 +14,8 @@ import {
   listWorkspaceStewards,
   revokeWorkspaceSteward,
 } from "../memory/stewards.js";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 /**
  * Workspace memory stewards (`/v1/team/memory/stewards`, KOBE-380, SM19): Team admins list, give
@@ -36,7 +36,7 @@ export function teamMemoryStewardRoutes(deps: ServerDeps): Hono<{ Variables: Tea
   });
 
   app.put("/:userId", async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     if (!userId.success) return invalidRequest(c, "userId must be a user id.");
     const r = await grantWorkspaceSteward(db, c.get("team").id, userId.data, c.get("user").id);
     if (!r.ok && r.code === "user_deactivated")
@@ -44,16 +44,15 @@ export function teamMemoryStewardRoutes(deps: ServerDeps): Hono<{ Variables: Tea
         { code: "user_deactivated", message: "Reactivate the account before granting." },
         409,
       );
-    if (!r.ok)
-      return c.json({ code: "user_not_found", message: "Not a member of this workspace." }, 404);
+    if (!r.ok) return notFound(c, "user_not_found", "Not a member of this workspace.");
     return c.json(r.steward);
   });
 
   app.delete("/:userId", async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     if (!userId.success) return invalidRequest(c, "userId must be a user id.");
     if (!(await revokeWorkspaceSteward(db, c.get("team").id, userId.data)))
-      return c.json({ code: "not_found", message: "That member is not a memory steward." }, 404);
+      return notFound(c, "not_found", "That member is not a memory steward.");
     return c.body(null, 204);
   });
 

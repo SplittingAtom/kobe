@@ -30,9 +30,9 @@ import {
   endorseSiteProposal,
   withdrawSiteProposal,
 } from "../memory/proposals/site/team.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { issueText, memoryRouteKit, refuseAgentWrites } from "./memory-items.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const badId = "id must be a proposal id.";
 
@@ -63,13 +63,13 @@ export function memorySiteProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.get("/:id", (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     return answer(c, "team", (who) => getWorkspaceSiteProposal(db, who, id.data));
   });
 
   app.post("/candidates/:candidateId", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("candidateId"));
+    const id = param(c, "candidateId", uuidSchema);
     if (!id.success) return invalidRequest(c, "candidateId must be a candidate id.");
     const body = await readBody(c, proposeSiteFromCandidateSchema);
     if (!body.success) return invalidRequest(c, issueText(body.error));
@@ -83,7 +83,7 @@ export function memorySiteProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.post("/:id/confirm", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     const body = await readBody(c, confirmSiteProposalSchema, true);
     if (!body.success) return invalidRequest(c, issueText(body.error));
@@ -95,7 +95,7 @@ export function memorySiteProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
     ["withdraw", withdrawSiteProposal],
   ] as const) {
     app.post(`/:id/${path}`, (c) => {
-      const id = uuidSchema.safeParse(c.req.param("id"));
+      const id = param(c, "id", uuidSchema);
       if (!id.success) return invalidRequest(c, badId);
       return answer(c, "team", (who) => fn(db, who, id.data));
     });
@@ -131,19 +131,19 @@ export function siteMemoryProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.get("/items/:itemId/provenance", (c) => {
-    const id = uuidSchema.safeParse(c.req.param("itemId"));
+    const id = param(c, "itemId", uuidSchema);
     if (!id.success) return invalidRequest(c, "itemId must be a memory id.");
     return answer(c, "site", (who) => siteItemProvenance(db, who, id.data));
   });
 
   app.get("/:id", (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     return answer(c, "site", (who) => getSiteProposal(db, who, id.data));
   });
 
   app.post("/:id/approve", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     const body = await readBody(c, approveSiteProposalSchema, true);
     if (!body.success) return invalidRequest(c, issueText(body.error));
@@ -151,7 +151,7 @@ export function siteMemoryProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.post("/:id/merge", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     const body = await readBody(c, mergeSiteProposalSchema);
     if (!body.success) return invalidRequest(c, issueText(body.error));
@@ -159,7 +159,7 @@ export function siteMemoryProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.post("/:id/reject", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     const body = await readBody(c, rejectSiteProposalSchema);
     if (!body.success) return invalidRequest(c, issueText(body.error));
@@ -167,7 +167,7 @@ export function siteMemoryProposalRoutes(deps: ServerDeps): Hono<{ Variables: Te
   });
 
   app.post("/:id/request-changes", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, badId);
     const body = await readBody(c, requestSiteChangesSchema);
     if (!body.success) return invalidRequest(c, issueText(body.error));

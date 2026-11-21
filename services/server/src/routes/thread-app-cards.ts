@@ -13,9 +13,9 @@ import type { BrowserPrincipal } from "../apps/call.js";
 import { appCallDepsFor } from "../apps/call-deps.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { draftOf, launchNewThreadBodySchema } from "../apps/new-thread-draft.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 /**
  * Rail launches (KOBE-440, spec MA11, §6), under the browser principal (the member and the active
@@ -88,20 +88,20 @@ export function threadAppCardRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
   });
 
   app.post("/:id/app-cards", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     const body = await parseBody(c, launchAppCardBodySchema);
     if (!id.success || !body) return invalidRequest(c, "Send {app_id}.");
     return answer(c, await launchAppCard(cardDeps, principal(c), id.data, body.app_id));
   });
 
   app.delete("/:id/app-cards/:ref", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
-    const ref = uuidSchema.safeParse(c.req.param("ref"));
+    const id = param(c, "id", uuidSchema);
+    const ref = param(c, "ref", uuidSchema);
     if (!id.success || !ref.success) return invalidRequest(c);
     const removed = await removeQueuedAppCard(cardDeps, principal(c), id.data, ref.data);
     return removed
       ? c.body(null, 204)
-      : c.json({ code: "not_found", message: "No waiting app card with that id." }, 404);
+      : notFound(c, "not_found", "No waiting app card with that id.");
   });
 
   return app;

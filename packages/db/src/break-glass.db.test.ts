@@ -3,6 +3,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { BreakGlassDenied, readWithBreakGlass, type BreakGlassRead } from "./break-glass/read.js";
 import { createDb } from "./client.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * KOBE-16 break-glass in the data layer: the guard trigger (two-person rule, roles, time box,
@@ -138,8 +139,7 @@ const errorCode = async (p: Promise<unknown>): Promise<string | undefined> => {
     await p;
   } catch (err) {
     if (err instanceof BreakGlassDenied) return err.code;
-    const e = err as { code?: string; cause?: { code?: string } };
-    return e.cause?.code ?? e.code;
+    return pgCodeOf(err);
   }
   return undefined;
 };

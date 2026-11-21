@@ -49,6 +49,7 @@ import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { CONTENT_MISSING, reportMissingContent } from "../workspace-sync/lost.js";
 import { currentEntry, lockWorkspace } from "../workspace-sync/store.js";
 import { checkoutSlugs, checkoutsHold } from "../workspace-sync/checkouts.js";
+import { invalidRequest } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 type ErrStatus = 400 | 403 | 404 | 409 | 411 | 413 | 415 | 422 | 502 | 503 | 507;
@@ -120,7 +121,7 @@ export function workspaceFileRoutes(
     if (folder !== "" && isInternalPath(folder)) return notFound(c);
     const after = query.data.cursor === undefined ? undefined : decodeCursor(query.data.cursor);
     if (query.data.cursor !== undefined && !after) {
-      return c.json({ code: "invalid_request", message: "That cursor is not valid." }, 400);
+      return invalidRequest(c, "That cursor is not valid.");
     }
     const owner = ownerOf(c);
     const listing = await withTeam(db, owner.teamId, (tx) =>
@@ -140,7 +141,7 @@ export function workspaceFileRoutes(
   app.get("/files/search", async (c) => {
     const query = workspaceSearchQuerySchema.safeParse(queryOf(c));
     if (!query.success) {
-      return c.json({ code: "invalid_request", message: "That is not a valid search." }, 400);
+      return invalidRequest(c, "That is not a valid search.");
     }
     const owner = ownerOf(c);
     if (!(await hitRateLimit(db, `workspace-search:${owner.userId}`, SEARCH_RATE_LIMIT))) {
@@ -207,14 +208,14 @@ export function workspaceFileRoutes(
       return fail(c, 413, "file_too_large", `Files over ${maxBytes} bytes are not accepted.`);
     }
     const body = c.req.raw.body;
-    if (!body) return c.json({ code: "invalid_request", message: "Malformed upload." }, 400);
+    if (!body) return invalidRequest(c, "Malformed upload.");
     // Streamed: the file reaches object storage without ever being held (KOBE-184).
     const opened = await openUpload(
       c.req.header("content-type"),
       Readable.fromWeb(body as WebReadableStream<Uint8Array>),
       workspaceUploadFieldsSchema,
     );
-    if (!opened.ok) return c.json({ code: "invalid_request", message: opened.reason }, 400);
+    if (!opened.ok) return invalidRequest(c, opened.reason);
     const { upload } = opened;
     const refuse = (res: Response): Response => {
       upload.file.destroy();

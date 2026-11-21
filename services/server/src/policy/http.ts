@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import type { z } from "zod";
-import { invalidRequest } from "../teams/http.js";
 import { expiresInFuture, ruleIdSchema, type RuleBodyFields } from "./schemas.js";
+import { invalidRequest, notFound, param, readJson } from "../http/request.js";
 
 export type ParsedBody<T> = { ok: true; value: T } | { ok: false; response: Response };
 
@@ -10,7 +10,7 @@ export async function parseRuleBody<T extends RuleBodyFields>(
   c: Context,
   schema: z.ZodType<T>,
 ): Promise<ParsedBody<T>> {
-  const parsed = schema.safeParse(await c.req.json().catch(() => null));
+  const parsed = schema.safeParse(await readJson(c, null));
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue?.path.join(".") ?? "body";
@@ -26,12 +26,12 @@ export async function parseRuleBody<T extends RuleBodyFields>(
 }
 
 export function ruleIdParam(c: Context): string | undefined {
-  const parsed = ruleIdSchema.safeParse(c.req.param("id"));
+  const parsed = param(c, "id", ruleIdSchema);
   return parsed.success ? parsed.data : undefined;
 }
 
 export function ruleNotFound(c: Context) {
-  return c.json({ code: "rule_not_found", message: "No such rule." }, 404);
+  return notFound(c, "rule_not_found", "No such rule.");
 }
 
 export function ruleLimitReached(c: Context) {

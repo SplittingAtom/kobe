@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readCapped } from "../connectors/probe.js";
+import { readCapped } from "../http/read-capped.js";
 
 /**
  * The server's client for mcp-proxy's `POST /internal/v1/app-calls` (KOBE-436): sends a call the

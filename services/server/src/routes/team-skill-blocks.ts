@@ -8,6 +8,7 @@ import {
 } from "../skills/skill-install-requests.js";
 import { listTeamMemberAdds } from "../skills/member-adds.js";
 import { blockCatalogSkill, listTeamBlocks, unblockCatalogSkill } from "../skills/team-blocks.js";
+import { notFound, param } from "../http/request.js";
 
 const idSchema = z.uuid();
 const NO_SKILL = { code: "not_found", message: "No catalog skill with that id." };
@@ -32,7 +33,7 @@ export function teamSkillBlockRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   );
 
   app.put("/blocks/:skillId", manage, async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     if (!id.success) return c.json(NO_SKILL, 404);
     const r = await blockCatalogSkill(db, {
       teamId: c.get("team").id,
@@ -52,12 +53,12 @@ export function teamSkillBlockRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.delete("/blocks/:skillId", manage, async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const done =
       id.success && (await unblockCatalogSkill(db, { teamId: c.get("team").id, skillId: id.data }));
     return done
       ? c.json({ blocked: false })
-      : c.json({ code: "not_found", message: "The team doesn't block that skill." }, 404);
+      : notFound(c, "not_found", "The team doesn't block that skill.");
   });
 
   app.get("/install-requests", manage, async (c) =>
@@ -65,13 +66,13 @@ export function teamSkillBlockRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   );
 
   app.post("/install-requests/:skillId/dismiss", manage, async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const done =
       id.success &&
       (await dismissSkillInstallRequests(db, { teamId: c.get("team").id, skillId: id.data }));
     return done
       ? c.json({ dismissed: true })
-      : c.json({ code: "not_found", message: "No open request for that skill." }, 404);
+      : notFound(c, "not_found", "No open request for that skill.");
   });
 
   return app;

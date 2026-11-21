@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, param } from "../http/request.js";
 
 /**
  * Departed members' workspaces (`/v1/team/offboarded`, spec D12, KOBE-28), team admins only. When a
@@ -21,7 +21,7 @@ export function teamOffboardedRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.get("/", async (c) => c.json({ members: await deps.offboarding.list(c.get("team").id) }));
 
   app.get("/:userId/export", async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     if (!userId.success) return invalidRequest(c);
     const started = await deps.offboarding.startExport(c.get("team").id, userId.data);
     if (started.kind === "unavailable") {

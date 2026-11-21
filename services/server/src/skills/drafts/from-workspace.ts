@@ -20,6 +20,7 @@ import {
   type ToolCallRef,
 } from "./service.js";
 import type { DraftRecord } from "./records.js";
+import { readCappedStream } from "../../http/read-capped.js";
 
 /**
  * Save to Workbench (KOBE-322, spec SK10 start 2): the folder `/workspace/skills/<folder>/` of the
@@ -142,7 +143,7 @@ async function readFolder(
     const object = await sync.objects.get(entry.blobKey as string);
     // Collected since the listing (the file changed meanwhile): the caller saves again.
     if (!object) return { ok: false, error: "folder_changed" };
-    const bytes = await readCapped(object.body, entry.size);
+    const bytes = await readCappedStream(object.body, entry.size);
     // Content-addressed: bytes that don't match the manifest's hash are not the synced file.
     if (!bytes || createHash("sha256").update(bytes).digest("hex") !== entry.sha256)
       throw new Error(
@@ -151,19 +152,6 @@ async function readFolder(
     files.set(path.slice(base.length + 1), new Uint8Array(bytes));
   }
   return files;
-}
-
-/** An object's bytes, or null once it holds more than the manifest's size (review N1). */
-async function readCapped(body: AsyncIterable<unknown>, size: number): Promise<Buffer | null> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of body) {
-    const b = Buffer.from(chunk as Uint8Array);
-    total += b.length;
-    if (total > size) return null;
-    chunks.push(b);
-  }
-  return Buffer.concat(chunks);
 }
 
 /** The caller's draft this conversation saves `name` into, if there is one. */

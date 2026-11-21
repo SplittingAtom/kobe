@@ -32,7 +32,7 @@ import {
   type SiteGrantError,
   type SiteGrantResult,
 } from "../site-break-glass/store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
@@ -195,7 +195,7 @@ export function sitePortableBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables
   });
 
   app.get("/:id", async (c) => {
-    const id = siteIdParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", siteIdParamSchema);
     if (!id.success) return fail(c, "grant_not_found");
     const viewer = c.get("user").id;
     const detail = await getSiteGrant(db, id.data, viewer);
@@ -204,7 +204,7 @@ export function sitePortableBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables
   });
 
   const decide = (action: typeof approveSiteGrant) => async (c: Ctx) => {
-    const id = siteIdParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", siteIdParamSchema);
     if (!id.success) return fail(c, "grant_not_found");
     return respond(c, await action(db, c.get("user").id, id.data));
   };
@@ -216,7 +216,7 @@ export function sitePortableBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables
   // ── Reads under an active grant (GET only: break-glass never writes) ──
 
   const read = async (c: Ctx, request: PortableBreakGlassRead) => {
-    const id = siteIdParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", siteIdParamSchema);
     if (!id.success) return { response: fail(c, "grant_not_found") };
     const adminId = c.get("user").id;
     if (
@@ -265,7 +265,7 @@ export function sitePortableBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables
   });
 
   app.get("/:id/items/:itemId", async (c) => {
-    const itemId = siteIdParamSchema.safeParse(c.req.param("itemId"));
+    const itemId = param(c, "itemId", siteIdParamSchema);
     if (!itemId.success) return fail(c, "item_not_found");
     const { result, response } = await read(c, { kind: "item", itemId: itemId.data });
     if (!result) return response;

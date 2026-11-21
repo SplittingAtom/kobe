@@ -12,12 +12,12 @@ import { withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import type { ResolvedAgent } from "../agents/version-routes.js";
-import { parseBody } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import type { Viewer } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { getAgentCase, listAgentCases, reviewAgentCase, type AgentKey } from "./review.js";
 import { myCases, previewCase, shareCase, withdrawCase } from "./share.js";
+import { param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -70,7 +70,7 @@ export function runEvalCaseRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   app.use(requireTeamPermission("team.chat"));
 
   app.post("/:id/eval-case/preview", limit(), async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return evalCaseError(c, "run_not_found");
     const body = await parseBody(c, evalCaseOptionsSchema);
     if (!body) return evalCaseError(c, "invalid_request");
@@ -79,7 +79,7 @@ export function runEvalCaseRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   app.post("/:id/eval-case", limit(), async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return evalCaseError(c, "run_not_found");
     const body = await parseBody(c, shareEvalCaseBodySchema);
     if (!body) return evalCaseError(c, "invalid_request");
@@ -104,7 +104,7 @@ export function evalCaseRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     return c.json({ cases });
   });
   app.delete("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (id.success) await asViewer(deps, c, (tx, viewer) => withdrawCase(tx, viewer, id.data));
     return c.body(null, 204);
   });
@@ -162,7 +162,7 @@ export function mountAgentEvalCases<E extends { Variables: object }>(
   app.get("/:id/eval-cases/:caseId", async (c) => {
     const key = await owned(c);
     if (key instanceof Response) return key;
-    const caseId = uuidSchema.safeParse(c.req.param("caseId"));
+    const caseId = param(c, "caseId", uuidSchema);
     if (!caseId.success) return evalCaseError(c, "case_not_found");
     const found = await inTeam(key, (tx) => getAgentCase(tx, key, caseId.data));
     return found ? c.json(found) : evalCaseError(c, "case_not_found");
@@ -171,7 +171,7 @@ export function mountAgentEvalCases<E extends { Variables: object }>(
   app.patch("/:id/eval-cases/:caseId", limit(), async (c) => {
     const key = await owned(c);
     if (key instanceof Response) return key;
-    const caseId = uuidSchema.safeParse(c.req.param("caseId"));
+    const caseId = param(c, "caseId", uuidSchema);
     if (!caseId.success) return evalCaseError(c, "case_not_found");
     const body = await parseBody(c, reviewEvalCaseBodySchema);
     if (!body) return evalCaseError(c, "invalid_request");

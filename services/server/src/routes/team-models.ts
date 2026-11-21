@@ -3,7 +3,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { aliasSchema, teamModelSchema } from "../models/schemas.js";
 import { listTeamModels, setTeamModel } from "../models/team-store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 /**
  * Team models (`/v1/team/models`, spec D6, D8, D30). Every member sees the catalog and what the
@@ -21,7 +21,7 @@ export function teamModelsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.put("/:alias", requireTeamPermission("team.models.manage"), async (c) => {
-    const alias = aliasSchema.safeParse(c.req.param("alias"));
+    const alias = param(c, "alias", aliasSchema);
     const input = await parseBody(c, teamModelSchema);
     if (!input)
       return invalidRequest(

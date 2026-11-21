@@ -10,7 +10,7 @@ import {
   removeMaintainer,
   type MaintainerResult,
 } from "../skills/registry/maintainers.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const idSchema = z.uuid();
 const addSchema = z.strictObject({ userId: z.uuid() });
@@ -41,11 +41,11 @@ export function catalogMaintainerRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
   const actor = (c: Ctx) => ({ userId: c.get("user").id, siteRole: c.get("siteRole") });
-  const skillId = (c: Ctx) => idSchema.safeParse(c.req.param("skillId"));
+  const skillId = (c: Ctx) => param(c, "skillId", idSchema);
 
   app.get("/:skillId/maintainers", async (c) => {
     const id = skillId(c);
-    if (!id.success) return c.json({ code: "not_found", message: "No such skill." }, 404);
+    if (!id.success) return notFound(c, "not_found", "No such skill.");
     return c.json({ maintainers: await listMaintainers(db, id.data) });
   });
 
@@ -58,7 +58,7 @@ export function catalogMaintainerRoutes(deps: ServerDeps): Hono<{ Variables: Aut
 
   app.delete("/:skillId/maintainers/:userId", async (c) => {
     const id = skillId(c);
-    const user = idSchema.safeParse(c.req.param("userId"));
+    const user = param(c, "userId", idSchema);
     if (!id.success || !user.success) return invalidRequest(c);
     return answer(c, await removeMaintainer(db, id.data, user.data, actor(c)));
   });

@@ -1,4 +1,4 @@
-import { sql, type KobeDb, type KobeTx } from "@kobe/db";
+import { sql, type KobeDb, type KobeTx, pgCodeOf } from "@kobe/db";
 import { PENDING_STATUSES } from "./external-scan-result.js";
 import { recordAudit } from "../../audit/record.js";
 import { blockedAmong } from "../blocklist.js";
@@ -124,10 +124,7 @@ class Refused extends Error {
   }
 }
 
-const isInsufficientPrivilege = (err: unknown) => {
-  const e = err as { code?: unknown; cause?: { code?: unknown } };
-  return (e.cause?.code ?? e.code) === "42501";
-};
+const isInsufficientPrivilege = (err: unknown) => pgCodeOf(err) === "42501";
 
 export async function approve(
   db: KobeDb,

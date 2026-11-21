@@ -5,8 +5,8 @@ import { DELEGATED_SESSION_PREFIX } from "../kobe-mcp/delegation.js";
 import { linkByLocalProof, listLinks, unlinkIdentity } from "../sso/linking.js";
 import { readPendingLink, takePendingLink } from "../sso/pending-link.js";
 import { eq, ssoProviders } from "@kobe/db";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 /**
  * The signed-in person's single sign-on links (`/v1/me/sso/links`, KOBE-630, spec sso-oidc-scim
@@ -22,7 +22,7 @@ export function meSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   const db = deps.database.db;
   app.use(async (c, next) => {
     if (!deps.sso.settings.enabled) {
-      return c.json({ code: "not_found", message: "Not found." }, 404);
+      return notFound(c, "not_found", "Not found.");
     }
     c.header("Cache-Control", "no-store");
     await next();
@@ -81,7 +81,7 @@ export function meSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   });
 
   app.delete("/links/:providerId", async (c) => {
-    const providerId = idSchema.safeParse(c.req.param("providerId"));
+    const providerId = param(c, "providerId", idSchema);
     if (!providerId.success) return invalidRequest(c);
     const result = await unlinkIdentity(db, {
       userId: c.get("user").id,
@@ -90,7 +90,7 @@ export function meSsoLinkRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     });
     if (result.ok) return c.json({ unlinked: true, sessionsEnded: result.sessionsEnded });
     return result.failure === "not_linked"
-      ? c.json({ code: "not_found", message: "Not linked to this provider." }, 404)
+      ? notFound(c, "not_found", "Not linked to this provider.")
       : c.json(
           {
             code: "last_sign_in_method",

@@ -15,8 +15,8 @@ import type { ServerDeps } from "../deps.js";
 import { exportItems } from "../memory/items/export-items.js";
 import { commitImport, previewImport } from "../memory/items/import.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { invalidRequest } from "../teams/http.js";
 import { issueText, memoryRouteKit, refuseAgentWrites } from "./memory-items.js";
+import { invalidRequest, readJson } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -47,7 +47,7 @@ export function memoryTransferRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
 
   /** The body, or a refusal: over 1 MiB is `memory_import_too_large` (413), as the contract says. */
   const importBody = async <T>(c: Ctx, schema: z.ZodType<T>): Promise<T | Response> => {
-    const raw: unknown = await c.req.json().catch(() => undefined);
+    const raw: unknown = await readJson(c, undefined);
     const content = (raw as { content?: unknown } | undefined)?.content;
     if (typeof content === "string" && utf8ByteLength(content) > SEMANTIC_MEMORY_IMPORT_MAX_BYTES)
       return c.json(
@@ -109,7 +109,7 @@ export function memoryTransferRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.post("/export", async (c) => {
     const refused = await limited(c, "memory-export", MEMORY_EXPORT_RATE);
     if (refused) return refused;
-    const raw: unknown = await c.req.json().catch(() => undefined);
+    const raw: unknown = await readJson(c, undefined);
     const q = semanticMemoryExportQuerySchema.safeParse(raw);
     if (!q.success) return invalidRequest(c, issueText(q.error));
     return answer(c, q.data.scope, async (who) => {

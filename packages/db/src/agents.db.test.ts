@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { siteAgents, teamAgents, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Agent definition tables (KOBE-45): team agents behind team RLS, personal and gallery agents
@@ -37,8 +38,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 const teamAgent = (

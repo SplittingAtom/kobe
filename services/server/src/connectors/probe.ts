@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { readCapped } from "../http/read-capped.js";
 
 /**
  * The server's client for the MCP proxy's probe endpoint (KOBE-101): the proxy fetches a
@@ -78,25 +79,6 @@ export interface ProxyProbeOptions {
 
 /** Largest proxy answer the server reads (16 templates of 512 KiB plus tools fit well). */
 export const PROBE_MAX_ANSWER_BYTES = 16 * 1024 * 1024;
-
-/** The body as text, refusing more than `max` bytes while it streams. */
-export async function readCapped(res: Response, max: number): Promise<string | undefined> {
-  if (!res.body) return "";
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
 
 export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
   const doFetch = options.fetch ?? fetch;

@@ -9,12 +9,12 @@ import {
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest } from "../teams/http.js";
 import { readAgentFiles } from "../threads/agent-files.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { fileEntry } from "../workspace-files/browse.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const NOT_FOUND = { code: "thread_not_found", message: "No thread with that id." };
 
@@ -34,7 +34,7 @@ export function threadFileEditRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.use(requireTeamPermission("team.chat"));
 
   app.get("/:id/file-edit-proposals", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -73,7 +73,7 @@ export function threadFileEditRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
    * so they get the same 404 as anyone else (and see the artifact badges only).
    */
   app.get("/:id/files", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;

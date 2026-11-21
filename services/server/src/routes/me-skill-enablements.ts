@@ -5,7 +5,7 @@ import type { ServerDeps } from "../deps.js";
 import { putMemberSkillAddSchema } from "@kobe/protocol";
 import { listSkillChoices, setEnablement } from "../skills/enablements.js";
 import { addForMe, listMyAdds, removeMyAdd, type AddRefusal } from "../skills/member-adds.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const enablementSchema = z.strictObject({
   kind: z.enum(["personal", "team", "catalog"]),
@@ -38,7 +38,7 @@ export function meSkillEnablementRoutes(deps: ServerDeps): Hono<{ Variables: Tea
     });
     if (r.ok) return c.json({ enabled: r.enabled });
     return r.code === "not_found"
-      ? c.json({ code: "not_found", message: "No such skill for you in this team." }, 404)
+      ? notFound(c, "not_found", "No such skill for you in this team.")
       : c.json(
           {
             code: "not_toggleable",
@@ -54,7 +54,7 @@ export function meSkillEnablementRoutes(deps: ServerDeps): Hono<{ Variables: Tea
   );
 
   app.put("/adds/:skillId", requireTeamPermission("team.read"), async (c) => {
-    const id = z.uuid().safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", z.uuid());
     if (!id.success) return c.json(ADD_ERRORS.not_found.body, 404);
     const body = await parseBody(c, putMemberSkillAddSchema);
     if (!body) return invalidRequest(c, "Send a version (x.y.z) and a pin mode.");
@@ -70,7 +70,7 @@ export function meSkillEnablementRoutes(deps: ServerDeps): Hono<{ Variables: Tea
   });
 
   app.delete("/adds/:skillId", requireTeamPermission("team.read"), async (c) => {
-    const id = z.uuid().safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", z.uuid());
     const done =
       id.success &&
       (await removeMyAdd(db, {
@@ -80,7 +80,7 @@ export function meSkillEnablementRoutes(deps: ServerDeps): Hono<{ Variables: Tea
       }));
     return done
       ? c.json({ removed: true })
-      : c.json({ code: "not_found", message: "You haven't added that skill here." }, 404);
+      : notFound(c, "not_found", "You haven't added that skill here.");
   });
 
   return app;

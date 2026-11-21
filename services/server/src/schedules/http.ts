@@ -6,6 +6,7 @@ import {
   type ScheduleError,
   type ScheduleErrorCode,
 } from "@kobe/protocol";
+import { readJson } from "../http/request.js";
 
 /** An answer chosen inside a transaction and sent after it commits (or rolls back). */
 export interface Answer {
@@ -84,7 +85,7 @@ export async function parseScheduleBody<T>(
   c: Context,
   schema: z.ZodType<T>,
 ): Promise<{ ok: true; data: T } | { ok: false; answer: Answer }> {
-  const parsed = schema.safeParse(await c.req.json().catch(() => null));
+  const parsed = schema.safeParse(await readJson(c, null));
   if (parsed.success) return { ok: true, data: parsed.data };
   const paths = parsed.error.issues.map((i) => i.path[0]);
   if (paths.includes("recurrence"))

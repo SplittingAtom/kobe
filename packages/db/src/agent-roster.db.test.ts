@@ -11,6 +11,7 @@ import {
   users,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Agent rosters (KOBE-565, spec agents-roster AR3/AR8/AR11): the team roster behind team RLS,
@@ -41,8 +42,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 const teamEntry = (

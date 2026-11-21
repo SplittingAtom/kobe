@@ -8,6 +8,7 @@ import {
 import type { SessionSigningKey } from "@kobe/session-token";
 import { SpanKind, idAttributes, injectTraceHeaders, withSpan } from "@kobe/telemetry";
 import { ServerCallError, mintToken, parseJson, refusalCode } from "./gateway-client.js";
+import { readCapped } from "../http/read-capped.js";
 
 /**
  * The server's embedding calls (KOBE-409) through the model gateway: one `POST /v1/embeddings`
@@ -43,24 +44,6 @@ export interface EmbeddingClientOptions {
   readonly key: SessionSigningKey;
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
-}
-
-async function readCapped(res: Response): Promise<string | undefined> {
-  if (!res.body) return "";
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_REPLY_BYTES) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 /** The vectors in input order, or why the reply cannot be used. */
@@ -139,7 +122,7 @@ export function createEmbeddingClient(options: EmbeddingClientOptions): Embeddin
           }
           let text: string | undefined;
           try {
-            text = await readCapped(res);
+            text = await readCapped(res, MAX_REPLY_BYTES);
           } catch {
             throw new ServerCallError(input.signal.aborted ? "timeout" : "unreadable", res.status);
           }

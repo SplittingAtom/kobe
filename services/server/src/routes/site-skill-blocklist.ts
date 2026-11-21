@@ -11,7 +11,7 @@ import {
   reasonSchema,
   removeBlocked,
 } from "../skills/blocklist.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const addSchema = z.strictObject({ contentHash: hashSchema, reason: reasonSchema });
 const limitSchema = z.coerce.number().int().min(1).max(200);
@@ -61,9 +61,9 @@ export function siteSkillBlocklistRoutes(deps: ServerDeps): Hono<{ Variables: Au
   });
 
   app.delete("/:hash", async (c) => {
-    const hash = hashSchema.safeParse(c.req.param("hash"));
+    const hash = param(c, "hash", hashSchema);
     if (!hash.success || !(await removeBlocked(db, hash.data)))
-      return c.json({ code: "not_found", message: "That hash is not on the blocklist." }, 404);
+      return notFound(c, "not_found", "That hash is not on the blocklist.");
     return c.body(null, 204);
   });
 

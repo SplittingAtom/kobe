@@ -1,7 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { ActorContext } from "@kobe/protocol";
 import type { AuthVariables } from "../auth/session.js";
 import {
   requireSitePermission,
@@ -21,8 +20,9 @@ import {
   type UsageTotals,
 } from "../models/usage-store.js";
 import { RunError } from "../runs/errors.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { actorOf } from "../authz/actor.js";
+import { invalidRequest, param } from "../http/request.js";
 
 /** Longest range one request may aggregate. */
 export const MAX_RANGE_DAYS = 400;
@@ -88,16 +88,6 @@ export function siteUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   return app;
 }
 
-function actorOf(c: Context<{ Variables: TeamVariables }>): ActorContext {
-  const team = c.get("team");
-  return {
-    user_id: c.get("user").id,
-    team_id: team.id,
-    site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
-  };
-}
-
 const EMPTY: UsageTotals = {
   calls: 0,
   input_tokens: 0,
@@ -132,7 +122,7 @@ export function runUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
   app.get("/:id/usage", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     return visible(c, async () => {
       const actor = actorOf(c);
@@ -158,7 +148,7 @@ export function threadUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
   app.get("/:id/usage", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     return visible(c, async () => {
       const actor = actorOf(c);

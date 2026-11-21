@@ -26,8 +26,8 @@ import {
   slugSchema,
   subjectClaimSchema,
 } from "../sso/schemas.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 /** Discovery tests (save or the Test button) one site admin may run per minute: outbound calls. */
 export const SSO_TESTS_PER_ADMIN_PER_MINUTE = 20;
@@ -160,7 +160,7 @@ export function siteSsoRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables
   app.get("/providers", async (c) => c.json({ providers: await listProviders(storeOf()) }));
 
   app.get("/providers/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const provider = id.success ? await getProvider(storeOf(), id.data) : undefined;
     return provider ? c.json({ provider }) : notFound(c);
   });
@@ -175,7 +175,7 @@ export function siteSsoRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables
 
   /** The Test button of a saved provider (Helm ones included). */
   app.post("/providers/:id/test", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const provider = id.success ? await getProvider(storeOf(), id.data) : undefined;
     if (!provider) return notFound(c);
     const t: DiscoveryTarget =
@@ -222,7 +222,7 @@ export function siteSsoRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables
   });
 
   app.patch("/providers/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const body = await parseBody(c, patchSchema);
     if (!body) return invalidRequest(c, "Check the provider's fields and try again.");
@@ -269,7 +269,7 @@ export function siteSsoRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables
   });
 
   app.delete("/providers/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const result = await deleteProvider(storeOf(), id.data);
     if (result.ok) return c.body(null, 204);

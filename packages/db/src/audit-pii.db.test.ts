@@ -17,6 +17,7 @@ import {
 import { createDb, type KobeDb } from "./client.js";
 import * as schema from "./schema/index.js";
 import { appendBackdatedAuditRow } from "./test-support/database.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * KOBE-17 audit chain v2: the IP and user agent are committed (salted) instead of hashed, erased
@@ -90,8 +91,7 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
   try {
     await promise;
   } catch (err) {
-    const e = err as { code?: string; cause?: { code?: string } };
-    return e.cause?.code ?? e.code;
+    return pgCodeOf(err);
   }
   return undefined;
 }

@@ -3,11 +3,11 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { Hono } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest } from "../teams/http.js";
 import { openUpload } from "../uploads/parse.js";
 import { createClamdScanner } from "../uploads/clamd.js";
 import { DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import { storeUpload } from "../uploads/store.js";
+import { invalidRequest } from "../http/request.js";
 
 /**
  * `POST /v1/uploads` (KOBE-143; contract in packages/protocol `uploads.ts`): multipart/form-data

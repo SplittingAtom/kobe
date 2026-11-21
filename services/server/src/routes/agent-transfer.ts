@@ -14,8 +14,8 @@ import type { AuthVariables } from "../auth/session.js";
 import type { TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
-import { parseBody } from "../teams/http.js";
 import { rosterError, teamActor, withinRate } from "./agent-roster.js";
+import { param, parseBody } from "../http/request.js";
 
 /**
  * Transfer and adopt routes (KOBE-568, agents-roster AR10, AR16, §6.8). Transfers are mounted inside
@@ -36,7 +36,7 @@ export function mountAgentTransferRoutes(
 
   /** The agent id from the path, then the rate budget: a Response when refused. */
   const begin = async (c: TeamCtx): Promise<string | Response> => {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     if (!id.success) return rosterError(c, "agent_not_found");
     if (!(await withinRate(deps, c.get("user").id))) return rosterError(c, "rate_limited");
     return id.data;
@@ -101,7 +101,7 @@ async function adopt(
   userId: string,
   teamId: string | null,
 ) {
-  const id = agentIdSchema.safeParse(c.req.param("agentId"));
+  const id = param(c, "agentId", agentIdSchema);
   if (!id.success) return rosterError(c, "roster_entry_not_found");
   if (!(await withinRate(deps, userId))) return rosterError(c, "rate_limited");
   const result = await adoptEntry(deps.database.db, { agentId: id.data, userId, target, teamId });

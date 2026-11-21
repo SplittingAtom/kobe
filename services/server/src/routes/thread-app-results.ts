@@ -3,10 +3,10 @@ import { withTeam } from "@kobe/db";
 import { appResultViews, readAppResult } from "../apps/thread-results.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 /**
  * MCP Apps in the conversation (KOBE-438, spec MA10), visible like the thread (`findThread`:
@@ -44,25 +44,23 @@ export function threadAppResultRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
   };
 
   app.get("/:id/app-results", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const ids = { teamId: c.get("team").id, userId: c.get("user").id, threadId: id.data };
     const found = await visible(c, id.data, (tx) => appResultViews(db, tx, ids));
-    if (!found)
-      return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);
+    if (!found) return notFound(c, "thread_not_found", "No thread with that id.");
     return c.json(found.value);
   });
 
   app.get("/:id/app-results/:ref", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
-    const ref = uuidSchema.safeParse(c.req.param("ref"));
+    const id = param(c, "id", uuidSchema);
+    const ref = param(c, "ref", uuidSchema);
     if (!id.success || !ref.success) return invalidRequest(c);
     const ids = { teamId: c.get("team").id, userId: c.get("user").id, threadId: id.data };
     const found = await visible(c, id.data, (tx) =>
       readAppResult(db, tx, deps.blobs, ids, ref.data, c.req.raw.signal),
     );
-    if (!found)
-      return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);
+    if (!found) return notFound(c, "thread_not_found", "No thread with that id.");
     const read = found.value;
     if (read.ok) return c.json({ input: read.input, result: read.result });
     if (read.code === "not_found") return c.json(NOT_FOUND, 404);

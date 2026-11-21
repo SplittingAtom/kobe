@@ -9,6 +9,7 @@ import {
   uuidSchema,
 } from "@kobe/protocol";
 import type { ApprovalRow } from "./store.js";
+import { parseCanonicalInput } from "./canonical-input.js";
 
 /**
  * An approval as the API shows it to the run's user (`GET /v1/approvals…`, the `POST` answer):
@@ -48,7 +49,7 @@ export function viewOf(row: ApprovalRow): ApprovalView {
     thread_id: row.threadId,
     tool_call_id: row.toolCallId,
     tool: row.tool,
-    input: JSON.parse(row.inputCanonical) as Record<string, unknown>,
+    input: parseCanonicalInput(row),
     risk: row.risk,
     reasons: [...row.reasons],
     status: row.status,

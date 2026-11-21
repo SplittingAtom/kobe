@@ -28,8 +28,8 @@ import { AGENT_DETAIL_VIEW, getItem, listItems } from "../memory/items/read.js";
 import { assertAgentRead, type MemoryWho } from "../memory/items/who.js";
 import { isWorkspaceSteward } from "../memory/stewards.js";
 import { grantsOf } from "../skills/registry/grants.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param, readJson } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -64,8 +64,8 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   };
   /** Scope and id of an item route, or a 400 response. */
   const target = (c: Ctx): { scope: SemanticMemoryScope; id: string } | Response => {
-    const scope = semanticMemoryScopeSchema.safeParse(c.req.param("scope"));
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const scope = param(c, "scope", semanticMemoryScopeSchema);
+    const id = param(c, "id", uuidSchema);
     if (!scope.success) return invalidRequest(c, "scope must be user, portable, team or site.");
     if (!id.success) return invalidRequest(c, "id must be a memory id.");
     return { scope: scope.data, id: id.data };
@@ -210,7 +210,7 @@ export function memoryRouteKit(deps: ServerDeps) {
   };
 
   const readBody = async <T>(c: Ctx, schema: z.ZodType<T>, optional = false) => {
-    const raw: unknown = await c.req.json().catch(() => undefined);
+    const raw: unknown = await readJson(c, undefined);
     return schema.safeParse(raw === undefined && optional ? {} : raw);
   };
 

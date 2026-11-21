@@ -9,12 +9,12 @@ import { RUN_SKILL_SOURCES, sql, withTeam, type KobeTx, type RunSkillRef } from 
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { skillUpdatesOf } from "../skills/usage.js";
-import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { projectMarkers, projectMarkerSchema } from "../threads/project-moves.js";
 import { agentMarkers, agentMarkerSchema } from "../threads/agent-switches.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 /** Most rows of each kind one answer carries (newest kept; a thread rarely has more). */
 export const MAX_MARKERS = 500;
@@ -240,7 +240,7 @@ export function threadMarkerRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
   app.use(requireTeamPermission("team.chat"));
 
   app.get("/:id/markers", async (c) => {
-    const parsed = uuidSchema.safeParse(c.req.param("id"));
+    const parsed = param(c, "id", uuidSchema);
     if (!parsed.success) return invalidRequest(c);
     const threadId = parsed.data;
     const teamId = c.get("team").id;
@@ -262,7 +262,7 @@ export function threadMarkerRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
         truncated: runs.truncated || approvals.truncated || skills.truncated || updates.truncated,
       } satisfies ThreadMarkers;
     });
-    if (!body) return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);
+    if (!body) return notFound(c, "thread_not_found", "No thread with that id.");
     return c.json(body);
   });
 

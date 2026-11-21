@@ -34,6 +34,7 @@ import { notifyMaintainers } from "../skills/site-edit/site-notify.js";
 import { previewSiteDraft, suggestSiteBump } from "../skills/site-edit/site-preview.js";
 import { publishSiteDraft, type PublishFailure } from "../skills/site-edit/site-publish.js";
 import { readBounded } from "./skill-drafts.js";
+import { param, readJson } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 type Status = 400 | 403 | 404 | 409 | 413 | 422 | 428 | 429 | 503;
@@ -156,7 +157,7 @@ export function siteSkillCatalogEditRoutes(deps: ServerDeps): Hono<{ Variables: 
   };
 
   const skillId = (c: Ctx) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     return id.success ? id.data : null;
   };
 
@@ -169,7 +170,7 @@ export function siteSkillCatalogEditRoutes(deps: ServerDeps): Hono<{ Variables: 
 
   app.get("/:skillId/versions/:versionId", async (c) => {
     const id = skillId(c);
-    const version = idSchema.safeParse(c.req.param("versionId"));
+    const version = param(c, "versionId", idSchema);
     const blobs = blobsOr(c);
     if (!blobs) return unavailable(c);
     if (!id || !version.success) return error(c, 404, "not_found", "No such version.");
@@ -180,7 +181,7 @@ export function siteSkillCatalogEditRoutes(deps: ServerDeps): Hono<{ Variables: 
 
   app.get("/:skillId/versions/:versionId/files/*", async (c) => {
     const id = skillId(c);
-    const version = idSchema.safeParse(c.req.param("versionId"));
+    const version = param(c, "versionId", idSchema);
     const blobs = blobsOr(c);
     if (!blobs) return unavailable(c);
     if (!id || !version.success) return error(c, 404, "not_found", "No such file.");
@@ -195,7 +196,7 @@ export function siteSkillCatalogEditRoutes(deps: ServerDeps): Hono<{ Variables: 
     const id = skillId(c);
     const blobs = blobsOr(c);
     if (!blobs) return unavailable(c);
-    const body = startSchema.safeParse(await c.req.json().catch(() => undefined));
+    const body = startSchema.safeParse(await readJson(c, undefined));
     if (!id) return error(c, 404, "not_found", "No such catalog skill.");
     if (!body.success) return error(c, 400, "invalid_request", "Give the version to start from.");
     const r = await startSiteDraft(
@@ -330,7 +331,7 @@ export function siteSkillCatalogEditRoutes(deps: ServerDeps): Hono<{ Variables: 
     if (!id) return error(c, 404, "not_found", "This skill has no site draft.");
     const rev = ifMatch(c);
     if (rev === null) return error(c, 428, "precondition_required", "Send If-Match: <rev>.");
-    const body = publishSchema.safeParse(await c.req.json().catch(() => undefined));
+    const body = publishSchema.safeParse(await readJson(c, undefined));
     if (!body.success)
       return error(c, 400, "invalid_request", "Give a semver (1.2.3) and a changelog.");
     const userId = c.get("user").id;

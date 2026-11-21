@@ -21,8 +21,8 @@ import {
 } from "../budgets/store.js";
 import { TEAM_EVAL_CAP_USD_MESSAGE, teamEvalCapSchema } from "@kobe/protocol";
 import { setEvalCap } from "../skills/settings.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, notFound, param, parseBody, readJson } from "../http/request.js";
 
 /** Dollars, at most two decimals' worth of meaning (stored to the cent); null = no budget. */
 const amount = z
@@ -147,7 +147,7 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   app.put("/members/:userId", requireTeamPermission("team.budgets.manage"), async (c) => {
-    const userId = uuidSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", uuidSchema);
     const input = await parseBody(c, memberSchema);
     if (!userId.success || !input) return invalidRequest(c, BUDGET_HINT);
     const teamId = c.get("team").id;
@@ -174,7 +174,11 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   // The team eval cap (KOBE-327, SK18): a spend limit, so the budget permission (coordinator
   // decision: never the skills review permission). `{evalCap: {usd} | {tokens} | null}`.
   app.put("/eval-cap", requireTeamPermission("team.budgets.manage"), async (c) => {
-    const body = (await c.req.json().catch(() => undefined)) as { evalCap?: unknown } | undefined;
+    // Only a JSON object can hold `evalCap`: a number or string body is refused like a missing key
+    // (review CODE-26: `"evalCap" in 5` threw, a 500).
+    const raw = await readJson(c, undefined);
+    const body =
+      typeof raw === "object" && raw !== null ? (raw as { evalCap?: unknown }) : undefined;
     const cap = teamEvalCapSchema.safeParse(body?.evalCap);
     if (!body || !("evalCap" in body) || !cap.success)
       return invalidRequest(
@@ -189,7 +193,7 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   app.delete("/members/:userId", requireTeamPermission("team.budgets.manage"), async (c) => {
-    const userId = uuidSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", uuidSchema);
     // An optional body `{expected}` (KOBE-621): remove only while the budget is still this one.
     const raw = await c.req.text();
     const body = raw === "" ? undefined : memberDeleteSchema.safeParse(safeJson(raw));
@@ -205,7 +209,7 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
     );
     if (result === "changed_since_approval") return c.json(CHANGED, 409);
     if (result !== "ok") {
-      return c.json({ code: "budget_not_found", message: "That member has no budget." }, 404);
+      return notFound(c, "budget_not_found", "That member has no budget.");
     }
     return c.json(await teamBudgetsView(db, teamId));
   });

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { count, eq, siteRoles } from "@kobe/db";
 import type { ServerDeps } from "../deps.js";
+import { readJson } from "../http/request.js";
 
 /** Serializes first-run setup across server replicas. */
 const SETUP_LOCK = 0x6b6f6201;
@@ -35,7 +36,7 @@ export function setupRoutes(deps: ServerDeps): Hono {
   app.post("/", async (c) => {
     // Cheap check first, without the lock: a finished install never holds a connection here.
     if (await ownerExists()) return c.json(complete, 409);
-    const parsed = setupSchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = setupSchema.safeParse(await readJson(c, null));
     if (!parsed.success) {
       return c.json(
         { code: "invalid_request", issues: parsed.error.issues.map((i) => i.message) },

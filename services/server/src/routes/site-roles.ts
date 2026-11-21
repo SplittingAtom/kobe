@@ -8,8 +8,8 @@ import { recordAudit } from "../audit/record.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { findUserId } from "../teams/members.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { idSchema, siteRoleChangeSchema, transferOwnershipSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 /**
  * Site roles (spec D8): one Owner (transferable), Admins, everyone else a User. Site admins
@@ -37,7 +37,7 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   });
 
   app.put("/:userId", requireSitePermission("site.roles.manage"), async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     const body = await parseBody(c, siteRoleChangeSchema);
     if (!userId.success || !body) return invalidRequest(c, "role must be admin or user.");
     if (!(await findUserId(db, { id: userId.data }))) return c.json(userNotFound, 404);
@@ -84,8 +84,8 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   );
 
   const grantParams = (c: { req: { param(name: string): string } }) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
-    const grant = z.enum(SITE_GRANTS).safeParse(c.req.param("grant"));
+    const userId = param(c, "userId", idSchema);
+    const grant = param(c, "grant", z.enum(SITE_GRANTS));
     return userId.success && grant.success ? { userId: userId.data, grant: grant.data } : null;
   };
 
@@ -115,8 +115,7 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     if (!p) return invalidRequest(c, "Name a user and a grant: skill_reviewer or memory_steward.");
     if (!(await findUserId(db, { id: p.userId }))) return c.json(userNotFound, 404);
     const { changed, removedFrom } = await takeGrant(db, p.userId, p.grant);
-    if (!changed)
-      return c.json({ code: "not_found", message: "That user doesn't hold that grant." }, 404);
+    if (!changed) return notFound(c, "not_found", "That user doesn't hold that grant.");
     // Left the Registry team with the grant: no project stays mounted there (MT4).
     if (removedFrom !== undefined) await deps.projectMounts.reconcileUser(removedFrom, p.userId);
     return new Response(null, { status: 204 });

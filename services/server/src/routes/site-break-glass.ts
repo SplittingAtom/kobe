@@ -34,9 +34,9 @@ import {
   type GrantResult,
 } from "../break-glass/store.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { decodeActivityCursor, encodeActivityCursor } from "../threads/cursor.js";
 import { toSummary } from "../threads/repository.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
@@ -209,7 +209,7 @@ export function siteBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   app.get("/:id", async (c) => {
-    const id = idParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParamSchema);
     if (!id.success) return fail(c, "grant_not_found");
     const detail = await getGrant(db, id.data, c.get("user").id);
     if (!detail) return fail(c, "grant_not_found");
@@ -218,7 +218,7 @@ export function siteBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   const decide = (action: typeof approveGrant) => async (c: Ctx) => {
-    const id = idParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParamSchema);
     if (!id.success) return fail(c, "grant_not_found");
     return respond(c, await action(db, c.get("user").id, id.data));
   };
@@ -230,7 +230,7 @@ export function siteBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   // ── Reads under an active grant (GET only: break-glass never writes) ──
 
   const read = async (c: Ctx, request: BreakGlassRead) => {
-    const id = idParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParamSchema);
     if (!id.success) return { response: fail(c, "grant_not_found") };
     const adminId = c.get("user").id;
     if (!(await hitRateLimit(db, `break-glass-read:${adminId}`, BREAK_GLASS_READ_LIMIT))) {
@@ -259,7 +259,7 @@ export function siteBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     }
   };
 
-  const threadParam = (c: Ctx) => idParamSchema.safeParse(c.req.param("threadId"));
+  const threadParam = (c: Ctx) => param(c, "threadId", idParamSchema);
 
   app.get("/:id/threads", async (c) => {
     const query = grantThreadsQuerySchema.safeParse(c.req.query());

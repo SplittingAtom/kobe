@@ -397,6 +397,313 @@ This archive holds the conversations you own in one Kobe team.
 Entries marked \`kobe_unavailable\` had a large body Kobe could not read back from storage.
 `;
 
+/** Where the export writes: zip entries, and the compressed bytes ready to send. */
+interface ZipSink {
+  file(name: string): ZipDeflate;
+  text(name: string, content: string): void;
+  /** Hands over the bytes compressed so far (throws the zip's failure, if any). */
+  drain(): Generator<Uint8Array>;
+}
+
+/** The parts of an export the threads' loop writes into (one thread at a time). */
+interface ExportScope {
+  readonly db: KobeDb;
+  readonly viewer: ExportViewer;
+  readonly blobs: BlobStore | undefined;
+  readonly zip: ZipSink;
+}
+
+/** One item of a JSON array written a row at a time (`first` decides the comma). */
+export function jsonArrayItem(first: boolean, value: unknown): string {
+  return `${first ? "" : ","}\n    ${JSON.stringify(value)}`;
+}
+
+/** The end of a JSON array object written with {@link jsonArrayItem}. */
+export function jsonArrayEnd(empty: boolean): string {
+  return `${empty ? "" : "\n  "}]\n}\n`;
+}
+
+/** A thread's entry in `threads.json`. */
+export function threadIndexEntry(input: {
+  readonly thread: ThreadRow;
+  readonly heading: ThreadHeading;
+  readonly session: string;
+  readonly transcript: string;
+  readonly folders: ReadonlyMap<string, unknown>;
+  readonly labels: readonly unknown[];
+  readonly branchFiles: readonly string[];
+  readonly branchesCapped: boolean;
+}): Record<string, unknown> {
+  const { thread, heading, folders, labels, branchFiles } = input;
+  return {
+    id: thread.id,
+    title: thread.title,
+    created_at: heading.createdAt,
+    last_activity_at: heading.lastActivityAt,
+    in_trash: heading.inTrash,
+    // The folder path by names (KOBE-534, TF9), when the thread is filed.
+    ...(thread.folder_id && folders.has(thread.folder_id)
+      ? { folder: folders.get(thread.folder_id) }
+      : {}),
+    session: input.session,
+    transcript: input.transcript,
+    // CT9/CT14: only for a thread that has them (a straight thread's entry is unchanged).
+    ...(labels.length > 0 ? { labels } : {}),
+    ...(branchFiles.length > 0 ? { branches: branchFiles } : {}),
+    ...(input.branchesCapped ? { branches_capped: true } : {}),
+  };
+}
+
+/** Streams a stored object into a zip entry and closes it. */
+async function* copyObject(zip: ZipSink, name: string, body: AsyncIterable<unknown>) {
+  const entry = zip.file(name);
+  for await (const chunk of body) {
+    entry.push(new Uint8Array(chunk as Buffer));
+    yield* zip.drain();
+  }
+  entry.push(new Uint8Array(0), true);
+  yield* zip.drain();
+}
+
+/** `sessions/<id>.jsonl`: the Pi session header, then every entry in append order. */
+async function* sessionFile(x: ExportScope, thread: ThreadRow, session: string) {
+  const jsonl = x.zip.file(session);
+  jsonl.push(
+    strToU8(
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: thread.id,
+        timestamp: iso(thread.created_at),
+        cwd: "/workspace",
+      })}\n`,
+    ),
+  );
+  for await (const rows of entries(x.db, x.viewer, thread.id)) {
+    // One entry at a time: at most one (capped) body is in memory.
+    for (const row of rows) {
+      const entry = await piEntry(row, x.blobs, x.viewer, thread.id);
+      jsonl.push(strToU8(`${JSON.stringify(entry)}\n`));
+      yield* x.zip.drain();
+    }
+  }
+  jsonl.push(new Uint8Array(0), true);
+}
+
+/**
+ * The transcript (the leaf's branch, CT14) and a file per other leaf's path; where each branch
+ * leaves the transcript is noted from the transcript's own entries.
+ */
+async function* transcriptFiles(
+  x: ExportScope,
+  thread: ThreadRow,
+  heading: ThreadHeading,
+  transcript: string,
+) {
+  const md = x.zip.file(transcript);
+  md.push(strToU8(threadHeader(heading)));
+  const tree = await threadTree(x.db, x.viewer, thread.id, thread.leaf_entry_id);
+  const { points, capped } = branchPoints(tree);
+  const leftAt = new Map<string, { k: number; excerpt: string }>();
+  let k = 0;
+  let excerpt = "";
+  for await (const rows of entries(x.db, x.viewer, thread.id)) {
+    for (const row of rows) {
+      if (!tree.main.has(row.entry_id)) continue;
+      const entry = await piEntry(row, x.blobs, x.viewer, thread.id);
+      const block = entryMarkdown(entry);
+      if (block !== null) md.push(strToU8(`\n${block}\n`));
+      const said = excerptOf(entryPlainText(entry));
+      if (said !== "") {
+        k += 1;
+        excerpt = said;
+      }
+      if (points.has(row.entry_id)) leftAt.set(row.entry_id, { k, excerpt });
+      yield* x.zip.drain();
+    }
+  }
+  md.push(new Uint8Array(0), true);
+  const labels = await threadLabels(x.db, x.viewer, thread.id);
+  const labelOf = new Map(labels.map((l) => [l.entry_id, l.label]));
+  const branchFiles: string[] = [];
+  for (const leaf of tree.leaves) {
+    if (branchFiles.length >= BRANCH_FILES_MAX) break;
+    // One branch's ids at a time; its rows are read by key.
+    const b = branchOf(tree, leaf);
+    if (b === undefined) continue;
+    const name = await branchFileName(
+      x.db,
+      x.viewer,
+      thread.id,
+      transcript,
+      branchFiles.length + 1,
+      b,
+      labelOf,
+    );
+    branchFiles.push(name);
+    yield* branchFile(x, thread.id, name, b, b.from === null ? undefined : leftAt.get(b.from));
+  }
+  return { labels, branchFiles, branchesCapped: capped };
+}
+
+async function* branchFile(
+  x: ExportScope,
+  threadId: string,
+  name: string,
+  b: ExportBranch,
+  from: { k: number; excerpt: string } | undefined,
+) {
+  const out = x.zip.file(name);
+  out.push(strToU8(`${branchedFromLine(from)}\n`));
+  for await (const rows of branchEntries(x.db, x.viewer, threadId, b.ids)) {
+    for (const row of rows) {
+      const block = entryMarkdown(await piEntry(row, x.blobs, x.viewer, threadId));
+      if (block !== null) out.push(strToU8(`\n${block}\n`));
+      yield* x.zip.drain();
+    }
+  }
+  out.push(new Uint8Array(0), true);
+  yield* x.zip.drain();
+}
+
+/** `artifacts/<id>/v<n>.<ext>`: every version; an unreadable body is left out. */
+async function* artifactFiles(x: ExportScope, threadId: string) {
+  const { blobs, viewer } = x;
+  let after: { artifactId: string; version: number } | null = null;
+  for (;;) {
+    const versions = await artifactVersionPage(x.db, viewer, threadId, after);
+    for (const v of versions) {
+      const bytes = blobs
+        ? await readArtifactBytes(blobs, viewer.teamId, threadId, v.blob_ref).catch(
+            (err: unknown) => {
+              logger.warn({ err, teamId: viewer.teamId, threadId }, "export: artifact unreadable");
+              return undefined;
+            },
+          )
+        : undefined;
+      const name = `artifacts/${v.artifact_id}/v${v.version}.${artifactExtension(v.kind, v.language)}`;
+      // A missing body is left out of the archive (as an unreadable offloaded entry is marked).
+      if (bytes) x.zip.file(name).push(new Uint8Array(bytes), true);
+      yield* x.zip.drain();
+    }
+    if (versions.length < ARTIFACT_PAGE) break;
+    const last = versions.at(-1);
+    after = last ? { artifactId: last.artifact_id, version: last.version } : null;
+    if (!after) break;
+  }
+}
+
+/** `files/<id>/<name>`: the thread's uploaded and shared files; a missing object is left out. */
+async function* threadFiles(x: ExportScope, threadId: string) {
+  const { blobs, viewer } = x;
+  let after: string | null = null;
+  for (;;) {
+    const page = await filePage(x.db, viewer, threadId, after);
+    for (const f of page) {
+      const object =
+        blobs && threadKey(blobs.prefix, viewer.teamId, threadId, f.blob_ref)
+          ? await blobs.objects.get(f.blob_ref).catch((err: unknown) => {
+              logger.warn({ err, teamId: viewer.teamId }, "export: file unreadable");
+              return null;
+            })
+          : null;
+      // A missing object is left out of the archive, as an unreadable artifact is.
+      if (!object) continue;
+      yield* copyObject(x.zip, `files/${f.id}/${f.name}`, object.body);
+    }
+    after = page.at(-1)?.id ?? null;
+    if (page.length < FILE_PAGE || after === null) break;
+  }
+}
+
+/** Everything one thread contributes; returns its `threads.json` entry. */
+async function* threadExport(
+  x: ExportScope,
+  thread: ThreadRow,
+  folders: ReadonlyMap<string, unknown>,
+) {
+  const session = `sessions/${thread.id}.jsonl`;
+  const transcript = transcriptName(thread);
+  yield* sessionFile(x, thread, session);
+  const heading: ThreadHeading = {
+    threadId: thread.id,
+    title: thread.title,
+    createdAt: iso(thread.created_at),
+    lastActivityAt: iso(thread.last_activity_at),
+    inTrash: thread.deleted_at !== null,
+  };
+  const branches = yield* transcriptFiles(x, thread, heading, transcript);
+  yield* artifactFiles(x, thread.id);
+  yield* threadFiles(x, thread.id);
+  return threadIndexEntry({ thread, heading, session, transcript, folders, ...branches });
+}
+
+/** The feedback array, page by page (ids and the rating only, no thread content). */
+async function* feedbackFile(x: ExportScope) {
+  const feedback = x.zip.file("feedback.json");
+  feedback.push(strToU8('{\n  "feedback": ['));
+  let after: string | null = null;
+  let first = true;
+  for (;;) {
+    const page = await feedbackPage(x.db, x.viewer, after);
+    for (const f of page) {
+      const row = {
+        thread_id: f.thread_id,
+        run_id: f.run_id,
+        entry_id: f.entry_id,
+        rating: f.rating,
+        reasons: f.reasons,
+        comment: f.comment,
+        created_at: iso(f.created_at),
+        updated_at: iso(f.updated_at),
+      };
+      feedback.push(strToU8(jsonArrayItem(first, row)));
+      first = false;
+    }
+    yield* x.zip.drain();
+    after = page.at(-1)?.id ?? null;
+    if (page.length < FEEDBACK_PAGE || after === null) break;
+  }
+  feedback.push(strToU8(jsonArrayEnd(first)), true);
+}
+
+/** A JSON array object (`{"<key>": [...]}`) from pages of rows. */
+async function* jsonArrayFile(
+  x: ExportScope,
+  name: string,
+  key: string,
+  pages: AsyncIterable<readonly unknown[]>,
+) {
+  const out = x.zip.file(name);
+  out.push(strToU8(`{\n  "${key}": [`));
+  let first = true;
+  for await (const page of pages) {
+    for (const row of page) {
+      out.push(strToU8(jsonArrayItem(first, row)));
+      first = false;
+    }
+    yield* x.zip.drain();
+  }
+  out.push(strToU8(jsonArrayEnd(first)), true);
+}
+
+/** The person's memory files and the projects they may read (object storage only). */
+async function* storedFiles(x: ExportScope, blobs: BlobStore) {
+  for await (const m of personalMemoryForExport(x.db, x.viewer, blobs)) {
+    x.zip.text(`memory/${m.path}`, m.content);
+    yield* x.zip.drain();
+  }
+  // GV5 (KOBE-579): the projects the viewer may read, their commit list and head files.
+  for await (const p of readableProjectsForExport(x.db, x.viewer)) {
+    x.zip.text(`projects/${p.slug}/commits.json`, `${JSON.stringify(p.meta, null, 2)}\n`);
+    for (const f of p.files) {
+      const object = await projectObject(blobs, x.viewer.teamId, p.meta.id, f.blobRef);
+      if (!object) continue;
+      yield* copyObject(x.zip, `projects/${p.slug}/head/${f.path}`, object.body);
+    }
+  }
+}
+
 /**
  * The zip as a byte stream. Pull-driven: each page is read when the client has taken the previous
  * bytes, so a slow download holds no more than a page in memory.
@@ -412,262 +719,49 @@ export async function* exportZip(
     if (err) failure = err;
     else out.push(data);
   });
-  const drain = function* () {
-    if (failure) throw failure;
-    while (out.length > 0) yield out.shift() as Uint8Array;
+  const sink: ZipSink = {
+    file: (name) => {
+      const f = new ZipDeflate(name, { level: 6 });
+      f.mtime = new Date();
+      zip.add(f);
+      return f;
+    },
+    text: (name, content) => sink.file(name).push(strToU8(content), true),
+    drain: function* () {
+      if (failure) throw failure;
+      while (out.length > 0) yield out.shift() as Uint8Array;
+    },
   };
-  const file = (name: string) => {
-    const f = new ZipDeflate(name, { level: 6 });
-    f.mtime = new Date();
-    zip.add(f);
-    return f;
-  };
-  const text = (name: string, content: string) => file(name).push(strToU8(content), true);
+  const x: ExportScope = { db, viewer, blobs, zip: sink };
 
-  text("README.md", README);
+  sink.text("README.md", README);
   const index: Record<string, unknown>[] = [];
   const folders = await folderPaths(db, viewer.teamId);
   let after: string | null = null;
   for (;;) {
     const threads = await threadPage(db, viewer, after);
     for (const thread of threads) {
-      const session = `sessions/${thread.id}.jsonl`;
-      const transcript = transcriptName(thread);
-      const jsonl = file(session);
-      jsonl.push(
-        strToU8(
-          `${JSON.stringify({
-            type: "session",
-            version: 3,
-            id: thread.id,
-            timestamp: iso(thread.created_at),
-            cwd: "/workspace",
-          })}\n`,
-        ),
-      );
-      for await (const rows of entries(db, viewer, thread.id)) {
-        // One entry at a time: at most one (capped) body is in memory.
-        for (const row of rows) {
-          const entry = await piEntry(row, blobs, viewer, thread.id);
-          jsonl.push(strToU8(`${JSON.stringify(entry)}\n`));
-          yield* drain();
-        }
-      }
-      jsonl.push(new Uint8Array(0), true);
-
-      const heading: ThreadHeading = {
-        threadId: thread.id,
-        title: thread.title,
-        createdAt: iso(thread.created_at),
-        lastActivityAt: iso(thread.last_activity_at),
-        inTrash: thread.deleted_at !== null,
-      };
-      const md = file(transcript);
-      md.push(strToU8(threadHeader(heading)));
-      // CT14: the transcript stays the leaf's branch; every other leaf's path gets a file.
-      const tree = await threadTree(db, viewer, thread.id, thread.leaf_entry_id);
-      const { points, capped: branchesCapped } = branchPoints(tree);
-      const leftAt = new Map<string, { k: number; excerpt: string }>();
-      let k = 0;
-      let excerpt = "";
-      for await (const rows of entries(db, viewer, thread.id)) {
-        for (const row of rows) {
-          if (!tree.main.has(row.entry_id)) continue;
-          const entry = await piEntry(row, blobs, viewer, thread.id);
-          const block = entryMarkdown(entry);
-          if (block !== null) md.push(strToU8(`\n${block}\n`));
-          const said = excerptOf(entryPlainText(entry));
-          if (said !== "") {
-            k += 1;
-            excerpt = said;
-          }
-          if (points.has(row.entry_id)) leftAt.set(row.entry_id, { k, excerpt });
-          yield* drain();
-        }
-      }
-      md.push(new Uint8Array(0), true);
-      const labels = await threadLabels(db, viewer, thread.id);
-      const labelOf = new Map(labels.map((l) => [l.entry_id, l.label]));
-      const branchFiles: string[] = [];
-      for (const leaf of tree.leaves) {
-        if (branchFiles.length >= BRANCH_FILES_MAX) break;
-        // One branch's ids at a time; its rows are read by key.
-        const b = branchOf(tree, leaf);
-        if (b === undefined) continue;
-        const name = await branchFileName(
-          db,
-          viewer,
-          thread.id,
-          transcript,
-          branchFiles.length + 1,
-          b,
-          labelOf,
-        );
-        branchFiles.push(name);
-        const out = file(name);
-        out.push(
-          strToU8(`${branchedFromLine(b.from === null ? undefined : leftAt.get(b.from))}\n`),
-        );
-        for await (const rows of branchEntries(db, viewer, thread.id, b.ids)) {
-          for (const row of rows) {
-            const block = entryMarkdown(await piEntry(row, blobs, viewer, thread.id));
-            if (block !== null) out.push(strToU8(`\n${block}\n`));
-            yield* drain();
-          }
-        }
-        out.push(new Uint8Array(0), true);
-        yield* drain();
-      }
-      let afterVersion: { artifactId: string; version: number } | null = null;
-      for (;;) {
-        const versions = await artifactVersionPage(db, viewer, thread.id, afterVersion);
-        for (const v of versions) {
-          const bytes = blobs
-            ? await readArtifactBytes(blobs, viewer.teamId, thread.id, v.blob_ref).catch(
-                (err: unknown) => {
-                  logger.warn(
-                    { err, teamId: viewer.teamId, threadId: thread.id },
-                    "export: artifact unreadable",
-                  );
-                  return undefined;
-                },
-              )
-            : undefined;
-          const name = `artifacts/${v.artifact_id}/v${v.version}.${artifactExtension(v.kind, v.language)}`;
-          // A missing body is left out of the archive (as an unreadable offloaded entry is marked).
-          if (bytes) file(name).push(new Uint8Array(bytes), true);
-          yield* drain();
-        }
-        if (versions.length < ARTIFACT_PAGE) break;
-        const last = versions.at(-1);
-        afterVersion = last ? { artifactId: last.artifact_id, version: last.version } : null;
-        if (!afterVersion) break;
-      }
-      let afterFile: string | null = null;
-      for (;;) {
-        const page = await filePage(db, viewer, thread.id, afterFile);
-        for (const f of page) {
-          const object =
-            blobs && threadKey(blobs.prefix, viewer.teamId, thread.id, f.blob_ref)
-              ? await blobs.objects.get(f.blob_ref).catch((err: unknown) => {
-                  logger.warn({ err, teamId: viewer.teamId }, "export: file unreadable");
-                  return null;
-                })
-              : null;
-          // A missing object is left out of the archive, as an unreadable artifact is.
-          if (!object) continue;
-          const entry = file(`files/${f.id}/${f.name}`);
-          for await (const chunk of object.body) {
-            entry.push(new Uint8Array(chunk as Buffer));
-            yield* drain();
-          }
-          entry.push(new Uint8Array(0), true);
-          yield* drain();
-        }
-        afterFile = page.at(-1)?.id ?? null;
-        if (page.length < FILE_PAGE || afterFile === null) break;
-      }
-      index.push({
-        id: thread.id,
-        title: thread.title,
-        created_at: heading.createdAt,
-        last_activity_at: heading.lastActivityAt,
-        in_trash: heading.inTrash,
-        // The folder path by names (KOBE-534, TF9), when the thread is filed.
-        ...(thread.folder_id && folders.has(thread.folder_id)
-          ? { folder: folders.get(thread.folder_id) }
-          : {}),
-        session,
-        transcript,
-        // CT9/CT14: only for a thread that has them (a straight thread's entry is unchanged).
-        ...(labels.length > 0 ? { labels } : {}),
-        ...(branchFiles.length > 0 ? { branches: branchFiles } : {}),
-        ...(branchesCapped ? { branches_capped: true } : {}),
-      });
-      yield* drain();
+      index.push(yield* threadExport(x, thread, folders));
+      yield* sink.drain();
     }
     if (threads.length < THREAD_PAGE) break;
     after = threads.at(-1)?.id ?? after;
   }
-  if (blobs) {
-    for await (const m of personalMemoryForExport(db, viewer, blobs)) {
-      text(`memory/${m.path}`, m.content);
-      yield* drain();
-    }
-    // GV5 (KOBE-579): the projects the viewer may read, their commit list and head files.
-    for await (const p of readableProjectsForExport(db, viewer)) {
-      text(`projects/${p.slug}/commits.json`, `${JSON.stringify(p.meta, null, 2)}\n`);
-      for (const f of p.files) {
-        const object = await projectObject(blobs, viewer.teamId, p.meta.id, f.blobRef);
-        if (!object) continue;
-        const entry = file(`projects/${p.slug}/head/${f.path}`);
-        for await (const chunk of object.body) {
-          entry.push(new Uint8Array(chunk as Buffer));
-          yield* drain();
-        }
-        entry.push(new Uint8Array(0), true);
-        yield* drain();
-      }
-    }
-  }
+  if (blobs) yield* storedFiles(x, blobs);
   // KOBE-649: the person's own semantic memories (no object storage needed).
-  const items = file("memory-items.json");
-  items.push(strToU8('{\n  "items": ['));
-  let firstItem = true;
-  for await (const page of semanticMemoryForExport(db, viewer)) {
-    for (const it of page) {
-      items.push(strToU8(`${firstItem ? "" : ","}\n    ${JSON.stringify(it)}`));
-      firstItem = false;
-    }
-    yield* drain();
-  }
-  items.push(strToU8(`${firstItem ? "" : "\n  "}]\n}\n`), true);
+  yield* jsonArrayFile(x, "memory-items.json", "items", semanticMemoryForExport(db, viewer));
   // KOBE-651: the person's Learn from this chat records.
-  const learning = file("memory-learning.json");
+  const learning = sink.file("memory-learning.json");
   for await (const chunk of learningExportJson(db, viewer)) {
     learning.push(strToU8(chunk));
-    yield* drain();
+    yield* sink.drain();
   }
   learning.push(new Uint8Array(0), true);
-  const feedback = file("feedback.json");
-  feedback.push(strToU8('{\n  "feedback": ['));
-  let afterFeedback: string | null = null;
-  let first = true;
-  for (;;) {
-    const page = await feedbackPage(db, viewer, afterFeedback);
-    for (const f of page) {
-      const row = {
-        thread_id: f.thread_id,
-        run_id: f.run_id,
-        entry_id: f.entry_id,
-        rating: f.rating,
-        reasons: f.reasons,
-        comment: f.comment,
-        created_at: iso(f.created_at),
-        updated_at: iso(f.updated_at),
-      };
-      feedback.push(strToU8(`${first ? "" : ","}\n    ${JSON.stringify(row)}`));
-      first = false;
-    }
-    yield* drain();
-    afterFeedback = page.at(-1)?.id ?? null;
-    if (page.length < FEEDBACK_PAGE || afterFeedback === null) break;
-  }
-  feedback.push(strToU8(`${first ? "" : "\n  "}]\n}\n`), true);
-  const cases = file("eval-cases.json");
-  cases.push(strToU8('{\n  "cases": ['));
-  let firstCase = true;
-  for await (const page of evalCasesForExport(db, viewer)) {
-    for (const c of page) {
-      cases.push(strToU8(`${firstCase ? "" : ","}\n    ${JSON.stringify(c)}`));
-      firstCase = false;
-    }
-    yield* drain();
-  }
-  cases.push(strToU8(`${firstCase ? "" : "\n  "}]\n}\n`), true);
-  text("threads.json", `${JSON.stringify({ threads: index }, null, 2)}\n`);
+  yield* feedbackFile(x);
+  yield* jsonArrayFile(x, "eval-cases.json", "cases", evalCasesForExport(db, viewer));
+  sink.text("threads.json", `${JSON.stringify({ threads: index }, null, 2)}\n`);
   zip.end();
-  yield* drain();
+  yield* sink.drain();
 }
 
 /** The export as a web stream for a Response body. */

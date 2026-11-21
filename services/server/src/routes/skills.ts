@@ -40,6 +40,7 @@ import {
   type SkillRecord,
   type SkillScope,
 } from "../skills/store.js";
+import { param } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -88,7 +89,7 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
 
   /** The skill and where it lives, if the caller can see it (team first, then personal). */
   async function visible(c: Ctx): Promise<{ skill: SkillRecord; location: SkillLocation } | null> {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return null;
     for (const scope of ["team", "personal"] as const) {
       const location = locationFor(c, scope);

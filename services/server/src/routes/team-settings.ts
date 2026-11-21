@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { readFollowupsEnabled, setFollowupsEnabled } from "../threads/followups.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 const bodySchema = z.strictObject({ followups_enabled: z.boolean() });
 

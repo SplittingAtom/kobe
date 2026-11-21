@@ -12,25 +12,13 @@ import type { ServerDeps } from "../deps.js";
 import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
 import { RunError } from "../runs/errors.js";
 import { queueOrderBodySchema } from "../runs/queue-order.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { prepareTestChat } from "../skills/drafts/test-chat.js";
-
-type RunContext = Context<{ Variables: TeamVariables }>;
-
-/** The verified caller (session + active team), never taken from the request body. */
-function actorOf(c: RunContext): ActorContext {
-  const team = c.get("team");
-  return {
-    user_id: c.get("user").id,
-    team_id: team.id,
-    site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
-  };
-}
+import { actorOf } from "../authz/actor.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 function idParam(c: Context): string | undefined {
-  const parsed = uuidSchema.safeParse(c.req.param("id"));
+  const parsed = param(c, "id", uuidSchema);
   return parsed.success ? parsed.data : undefined;
 }
 

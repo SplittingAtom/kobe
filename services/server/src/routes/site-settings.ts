@@ -17,6 +17,7 @@ import { recordAudit } from "../audit/record.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { readKobeMode, storeKobeMode } from "../kobe-mcp/switches.js";
+import { readJson } from "../http/request.js";
 
 const settingsSchema = z
   .strictObject({
@@ -57,7 +58,7 @@ export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   app.get("/", async (c) => c.json(await current()));
 
   app.put("/", async (c) => {
-    const parsed = settingsSchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = settingsSchema.safeParse(await readJson(c, null));
     if (!parsed.success) {
       return c.json(
         {

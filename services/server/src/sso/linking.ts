@@ -17,6 +17,7 @@ import {
   users,
   type KobeDb,
   type KobeTx,
+  isUniqueViolation,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import type { VerifiedIdentity } from "./claims.js";
@@ -42,15 +43,6 @@ import type { LinkIntent } from "./link-intent.js";
 export const LINK_EXPECTATION_TTL_MS = 14 * 24 * 3_600_000;
 
 const domainOf = (email: string): string => email.slice(email.lastIndexOf("@") + 1).toLowerCase();
-
-const isUniqueViolation = (err: unknown): boolean => {
-  let e: unknown = err;
-  for (let depth = 0; depth < 4 && e; depth++) {
-    if ((e as { code?: unknown }).code === "23505") return true;
-    e = (e as { cause?: unknown }).cause;
-  }
-  return false;
-};
 
 /** The provider's verified domains admit this address (an expected link needs one, §6). */
 export function domainAllowed(allowedEmailDomains: readonly string[], email: string): boolean {

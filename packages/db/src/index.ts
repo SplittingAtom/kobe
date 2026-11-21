@@ -50,12 +50,15 @@ export {
   PG_DEADLOCK_DETECTED,
   PG_FOREIGN_KEY_VIOLATION,
   PG_LOCK_NOT_AVAILABLE,
+  PG_UNIQUE_VIOLATION,
   isForeignKeyViolation,
   isLockConflict,
   isLockTimeout,
+  isUniqueViolation,
   pgCodeOf,
   pgErrorOf,
 } from "./pg-errors.js";
+export { CURSOR_MAX_LENGTH, makeCursorCodec, type CursorCodec } from "./cursor-codec.js";
 export {
   APP_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   APP_STATEMENT_TIMEOUT_MS,

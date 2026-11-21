@@ -14,9 +14,9 @@ import {
   previewSuggestion,
 } from "../memory/suggestions/decide.js";
 import { listSuggestions } from "../memory/suggestions/list.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { issueText, memoryRouteKit, refuseAgentWrites } from "./memory-items.js";
+import { invalidRequest } from "../http/request.js";
 
 const listQuery = z.object({ project_id: uuidSchema.optional() });
 

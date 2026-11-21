@@ -12,12 +12,12 @@ import {
   fileStem,
   readArtifactBytes,
 } from "../artifacts/serve.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { viewerProjectIds } from "../threads/references.js";
 import type { Viewer } from "../threads/repository.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { registerEditAsFile } from "./artifact-edit-as-file.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 type ArtifactContext = Context<{ Variables: TeamVariables }>;
 type FoundVersion = NonNullable<Awaited<ReturnType<typeof findVersionBlob>>>;
@@ -61,13 +61,13 @@ export function artifactRoutes(
     c: ArtifactContext,
     check?: (found: FoundVersion) => Response | undefined,
   ) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     const n = versionParam(c.req.param("n") ?? "");
     if (!id.success || n === undefined) return { response: invalidRequest(c) };
     const found = await asViewer(c, (tx, viewer) => findVersionBlob(tx, viewer, id.data, n));
     if (!found) {
       return {
-        response: c.json({ code: "version_not_found", message: "No such artifact version." }, 404),
+        response: notFound(c, "version_not_found", "No such artifact version."),
       };
     }
     const refused = check?.(found);
@@ -100,13 +100,13 @@ export function artifactRoutes(
     if (!threadId.success) return invalidRequest(c);
     const list = await asViewer(c, (tx, viewer) => listArtifacts(tx, viewer, threadId.data));
     if (!list) {
-      return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);
+      return notFound(c, "thread_not_found", "No thread with that id.");
     }
     return c.json({ artifacts: list });
   });
 
   app.get("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const detail = await asViewer(c, (tx, viewer) => artifactDetail(tx, viewer, id.data));
     return detail ? c.json(detail) : c.json(NOT_FOUND, 404);

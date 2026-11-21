@@ -17,7 +17,7 @@ import {
   writeSiteRememberLimits,
 } from "../policy/remember-limits-store.js";
 import { siteRuleBodySchema, SCOPE_LIMITS, policySettingsBodySchema } from "../policy/schemas.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /**
  * The site policy floor (`/v1/site/policy`, spec D6, D8, D29): deny and ask rules that bind

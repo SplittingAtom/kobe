@@ -21,6 +21,7 @@ import {
   type KobeTx,
   type SkillReviewStatus,
   type StoredFinding,
+  makeCursorCodec,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
@@ -148,16 +149,11 @@ const cursorSchema = z.object({
   version: z.number().int().positive(),
 });
 
-const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString("base64url");
+export const reviewCursor = makeCursorCodec(cursorSchema);
 
 /** Undefined for a malformed cursor (a 400 for the caller). */
 export function decodeCursor(value: string): Cursor | undefined {
-  try {
-    const parsed = cursorSchema.safeParse(JSON.parse(Buffer.from(value, "base64url").toString()));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
+  return reviewCursor.decode(value);
 }
 
 /**
@@ -209,7 +205,7 @@ export function listReviews(
     const last = pageKeys.at(-1);
     const nextCursor =
       keys.length > limit && last
-        ? encodeCursor({
+        ? reviewCursor.encode({
             flagged: last.flagged,
             at: last.at,
             skillId: last.skillId,

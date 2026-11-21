@@ -5,8 +5,8 @@ import type { ServerDeps } from "../deps.js";
 import { listItemSignals, QUALITY_FILTERS } from "../memory/quality/items.js";
 import { sitePassSignals, workspacePassSignals } from "../memory/quality/passes.js";
 import { siteQueueHealth, workspaceQueueHealth } from "../memory/quality/queues.js";
-import { invalidRequest } from "../teams/http.js";
 import { issueText, memoryRouteKit, refuseAgentWrites } from "./memory-items.js";
+import { invalidRequest } from "../http/request.js";
 
 const workspaceItemsQuery = z.strictObject({
   scope: z.enum(["user", "team"]).default("team"),

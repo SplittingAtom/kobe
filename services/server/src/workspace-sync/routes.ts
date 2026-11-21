@@ -41,6 +41,7 @@ import {
   reserveUpload,
 } from "./store.js";
 import { WRITE_SPAN, s3PutSpan, writeTxSpan } from "./write-spans.js";
+import { param } from "../http/request.js";
 
 /** Requests per sandbox: a burst big enough for a restore's downloads, then a steady rate. */
 export const WORKSPACE_RATE = { capacity: 2000, refillPerSecond: 500 } as const;
@@ -435,7 +436,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
 
   app.put("/blobs/:sha256", async (c) => {
     const caller = c.get("caller");
-    const sha = sha256HexSchema.safeParse(c.req.param("sha256"));
+    const sha = param(c, "sha256", sha256HexSchema);
     const size = Number(c.req.header("content-length") ?? "NaN");
     if (!sha.success) return error(c, 400, "invalid_request", "The name must be a SHA-256.");
     if (!Number.isSafeInteger(size) || size < 0) {

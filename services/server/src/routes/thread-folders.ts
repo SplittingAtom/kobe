@@ -9,7 +9,6 @@ import {
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import {
   createFolder,
   deleteFolder,
@@ -23,6 +22,7 @@ import {
 import { viewerProjectIds } from "../threads/references.js";
 import type { Viewer } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type FolderContext = Context<{ Variables: TeamVariables }>;
 
@@ -48,7 +48,7 @@ function fail(c: Context, code: FolderError | "rate_limited" | "folder_busy") {
 }
 
 function folderIdParam(c: Context): string | undefined {
-  const parsed = uuidSchema.safeParse(c.req.param("id"));
+  const parsed = param(c, "id", uuidSchema);
   return parsed.success ? parsed.data : undefined;
 }
 

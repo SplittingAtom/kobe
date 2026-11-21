@@ -18,38 +18,54 @@ export async function delegationBacked(
   d: Delegation,
   opts: { readonly ssoEnabled: boolean; readonly ssoMfaProof?: boolean },
 ): Promise<boolean> {
+  const backing = await delegationBacking(db, d, opts);
+  return opts.ssoMfaProof === true ? backing.withMfaProof : backing.backed;
+}
+
+/** Both answers of {@link delegationBacked}, without and with `ssoMfaProof`, in one query. */
+export interface DelegationBacking {
+  readonly backed: boolean;
+  readonly withMfaProof: boolean;
+}
+
+export async function delegationBacking(
+  db: KobeDb,
+  d: Delegation,
+  opts: { readonly ssoEnabled: boolean },
+): Promise<DelegationBacking> {
+  // A session of the person, live now and already live when the run started.
+  const backing = sql`
+    s.user_id = ${d.userId} AND s.expires_at > now()
+    AND s.created_at <= r.created_at
+    -- An SSO sign-in backs a delegation only as it would back a request (SSO review):
+    -- not while the kill switch is off, not past its provider's max_session_hours.
+    AND NOT EXISTS (
+      SELECT 1 FROM public.session_sso_contexts c
+        JOIN public.sso_providers p ON p.id = c.provider_id
+       WHERE c.session_id = s.id
+         AND (NOT ${opts.ssoEnabled}::boolean
+              OR (p.max_session_hours IS NOT NULL
+                  AND s.created_at + make_interval(hours => p.max_session_hours) <= now())))`;
+  // require_2fa (KOBE-629 review L1): the session passed 2FA itself. A local one by the person's
+  // enrolled TOTP; an SSO one only by its own MFA proof.
+  const mfaProof = sql`
+    CASE WHEN EXISTS (SELECT 1 FROM public.session_sso_contexts c WHERE c.session_id = s.id)
+         THEN EXISTS (SELECT 1 FROM public.session_sso_contexts c
+                       WHERE c.session_id = s.id AND c.mfa_satisfied)
+         ELSE EXISTS (SELECT 1 FROM public.users u
+                       WHERE u.id = s.user_id AND u.two_factor_enabled)
+    END`;
   return withTeam(db, d.teamId, async (tx) => {
-    const res = await tx.execute<{ ok: boolean }>(sql`
-      SELECT EXISTS (
-        SELECT 1 FROM public.sessions s
-         WHERE s.user_id = ${d.userId} AND s.expires_at > now()
-           AND s.created_at <= r.created_at
-           -- An SSO sign-in backs a delegation only as it would back a request (SSO review):
-           -- not while the kill switch is off, not past its provider's max_session_hours.
-           AND NOT EXISTS (
-             SELECT 1 FROM public.session_sso_contexts c
-               JOIN public.sso_providers p ON p.id = c.provider_id
-              WHERE c.session_id = s.id
-                AND (NOT ${opts.ssoEnabled}::boolean
-                     OR (p.max_session_hours IS NOT NULL
-                         AND s.created_at + make_interval(hours => p.max_session_hours) <= now())))
-           -- require_2fa (KOBE-629 review L1): the session passed 2FA itself. A local one by
-           -- the person's enrolled TOTP; an SSO one only by its own MFA proof.
-           AND (NOT ${opts.ssoMfaProof === true}::boolean
-                OR CASE WHEN EXISTS (SELECT 1 FROM public.session_sso_contexts c
-                                      WHERE c.session_id = s.id)
-                        THEN EXISTS (SELECT 1 FROM public.session_sso_contexts c
-                                      WHERE c.session_id = s.id AND c.mfa_satisfied)
-                        ELSE EXISTS (SELECT 1 FROM public.users u
-                                      WHERE u.id = s.user_id AND u.two_factor_enabled)
-                   END)
-        ) AS ok
+    const res = await tx.execute<{ ok: boolean; ok_mfa: boolean }>(sql`
+      SELECT EXISTS (SELECT 1 FROM public.sessions s WHERE ${backing}) AS ok,
+             EXISTS (SELECT 1 FROM public.sessions s WHERE ${backing} AND ${mfaProof}) AS ok_mfa
         FROM runs r
         JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
        WHERE r.team_id = ${d.teamId} AND t.team_id = ${d.teamId}
          AND r.id = ${d.runId} AND t.id = ${d.threadId}
          AND t.owner_user_id = ${d.userId}
          AND r.status IN ('running', 'waiting_approval')`);
-    return res.rows[0]?.ok === true;
+    const row = res.rows[0];
+    return { backed: row?.ok === true, withMfaProof: row?.ok_mfa === true };
   });
 }

@@ -9,7 +9,8 @@ import { hitRateLimit } from "../rate-limit.js";
 import type { SandboxWaker } from "../sandbox-wire/types.js";
 import { createWorkspaceEventStream } from "../workspace-files/event-stream.js";
 import { readWorkspaceVersions } from "../workspace-files/events.js";
-import { nodeResponseDestroyer, SSE_HEADERS } from "./workspace-changes.js";
+import { nodeResponseDestroyer, SSE_HEADERS } from "../http/sse.js";
+import { invalidRequest } from "../http/request.js";
 
 /** Refreshes (sync now) per member per minute: each may hold a sandbox push. */
 export const SYNC_RATE_LIMIT = { windowMs: 60_000, max: 30 };
@@ -60,7 +61,7 @@ export function registerWorkspaceEvents(
     const params = new URL(c.req.url).searchParams;
     const query = workspaceEventsQuerySchema.safeParse(Object.fromEntries(params));
     if (!query.success) {
-      return c.json({ code: "invalid_request", message: "That is not a valid request." }, 400);
+      return invalidRequest(c, "That is not a valid request.");
     }
     const owner = { teamId: c.get("team").id, userId: c.get("user").id };
     if (query.data.team !== owner.teamId) {

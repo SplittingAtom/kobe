@@ -36,8 +36,8 @@ import {
 import { setPlacementSchema, setTemplatePlacement } from "../connectors/template-placement.js";
 import { listTeamsUsing } from "../connectors/team-usage.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { PIN_MESSAGES } from "./connector-messages.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const idSchema = z.uuid();
 
@@ -109,7 +109,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   app.get("/", async (c) => c.json({ connectors: await listConnectors(db) }));
 
   app.get("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const found = id.success ? await getConnector(db, id.data) : undefined;
     return found ? c.json({ connector: found }) : notFound(c);
   });
@@ -128,7 +128,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   app.patch("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const input = await parseBody(c, updateSchema);
     if (!input) return invalidRequest(c, invalidFields);
@@ -168,7 +168,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   // Probe and pin again, for a connector that has none (the registration probe failed).
   app.post("/:id/pin", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const pin = id.success ? await pinAs(c, id.data) : undefined;
     if (!id.success || !pin) return notFound(c);
     const connector = await getConnector(db, id.data);
@@ -187,7 +187,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     lockFor: connectorRefreshLocks(deps.database.pool),
   });
   app.post("/:id/refresh", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const result = await reprobeConnector(reprobeDeps(), id.data, c.get("user").id);
     if (result.kind === "not_found") return notFound(c);
@@ -199,7 +199,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   // The connector's site-wide key (KOBE-303): set or replace, then pin with it if unpinned.
   app.put("/:id/site-key", async (c) => {
     c.header("Cache-Control", "no-store");
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const body = await parseBody(c, putGrantSchema);
     if (!body) {
@@ -231,7 +231,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   app.delete("/:id/site-key", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const removed = id.success ? await removeSiteKey(db, id.data) : undefined;
     if (removed === undefined) return notFound(c);
     return removed
@@ -241,14 +241,14 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   // What each tool is now: approved vs live definition, for the re-approval review (KOBE-102).
   app.get("/:id/tools", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const tools = id.success ? await reviewConnectorTools(db, id.data) : undefined;
     return tools ? c.json({ tools }) : notFound(c);
   });
 
   // Re-approve drifted tools, each with the hash of the live definition that was reviewed.
   app.post("/:id/tools/approve", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const input = await parseBody(c, approveSchema);
     if (!input) {
@@ -276,14 +276,14 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   // The teams that enabled it, with their exposure (KOBE-641 detail panel). Read-only.
   app.get("/:id/teams", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const teams = id.success ? await listTeamsUsing(db, id.data) : undefined;
     return teams ? c.json({ teams }) : notFound(c);
   });
 
   // MCP Apps templates (KOBE-434): approved vs live versions for the review, without the bytes.
   app.get("/:id/templates", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const templates = id.success ? await reviewConnectorTemplates(db, id.data) : undefined;
     return templates ? c.json({ templates }) : notFound(c);
   });
@@ -291,7 +291,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   // A template's bytes for the escaped diff and the stubbed preview: JSON only, never text/html,
   // never cached, never sniffed or run as a page on Kobe's origin (spec MA4).
   app.get("/:id/templates/source", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const uri = c.req.query("uri");
     const source =
       id.success && uri !== undefined ? await connectorTemplateSource(db, id.data, uri) : undefined;
@@ -315,7 +315,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
         403,
       );
     }
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const uri = c.req.query("uri");
     const which = c.req.query("version");
     const html =
@@ -338,7 +338,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   // Approve templates, each with the pinned hash of the live version that was reviewed.
   app.post("/:id/templates/approve", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const input = await parseBody(c, approveTemplatesSchema);
     if (!input) {
@@ -358,7 +358,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   // Where a template's app opens (KOBE-531): `chat`, `artifacts` or `rail`; not part of the pin.
   app.put("/:id/templates/placement", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     if (!id.success) return notFound(c);
     const input = await parseBody(c, setPlacementSchema);
     if (!input) {
@@ -371,7 +371,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   app.delete("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const result = id.success ? await removeConnector(db, id.data) : undefined;
     if (!result) return notFound(c);
     const message =

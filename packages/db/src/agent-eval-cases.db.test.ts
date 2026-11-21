@@ -6,6 +6,7 @@ import { createDb } from "./client.js";
 import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
 import { BREAK_GLASS_ACTOR_SETTING, BREAK_GLASS_GRANT_SETTING } from "./settings.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * KOBE-276: agent_eval_cases' constraints, the rating key, immutability, the legal-hold history
@@ -108,8 +109,7 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
   try {
     await promise;
   } catch (err) {
-    const e = err as { code?: string; cause?: { code?: string } };
-    return e.cause?.code ?? e.code;
+    return pgCodeOf(err);
   }
   return undefined;
 }

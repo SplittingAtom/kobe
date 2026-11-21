@@ -14,7 +14,6 @@ import type { ServerDeps } from "../deps.js";
 import { RunError } from "../runs/errors.js";
 import { checkMentionsExist } from "../runs/mentions.js";
 import { principalActive } from "../runs/store.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import {
   NOT_ALLOWED,
@@ -43,6 +42,7 @@ import {
   updateSchedule,
   type ScheduleRow,
 } from "../schedules/store.js";
+import { invalidRequest, param } from "../http/request.js";
 
 /**
  * Only the server writes a skill line or app context into a run's input (KOBE-439, KOBE-451
@@ -188,7 +188,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   };
 
   app.get("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -200,7 +200,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   app.patch("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const parsed = await parseScheduleBody<PatchScheduleBody>(c, patchScheduleBodySchema);
     if (!parsed.ok) return send(c, parsed.answer);
@@ -272,7 +272,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   app.delete("/:id", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -286,7 +286,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   app.post("/:id/pause", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -312,7 +312,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   app.post("/:id/resume", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;

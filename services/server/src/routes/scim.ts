@@ -30,6 +30,7 @@ import {
   type ScimContext,
   type ScimFailure,
 } from "../sso/scim/users.js";
+import { readJson } from "../http/request.js";
 
 type ScimEnv = { Variables: { scim: ScimCaller } };
 
@@ -44,7 +45,7 @@ function unauthorized(c: Context): Response {
 const sendFailure = (c: Context, f: ScimFailure) => scimError(c, f.status, f.detail, f.scimType);
 
 async function jsonBody(c: Context): Promise<unknown> {
-  return c.req.json().catch(() => undefined);
+  return readJson(c, undefined);
 }
 
 /**

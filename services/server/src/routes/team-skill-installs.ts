@@ -10,11 +10,11 @@ import {
   reinstallDefault,
   uninstallCatalogSkill,
 } from "../skills/team-installs.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { skillInstallDiff, skillInstallUpdates } from "../skills/skill-install-updates.js";
 import { semverSchema } from "../skills/semver.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { REQUIRED_WARN_AT } from "../skills/access.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const idSchema = z.uuid();
 
@@ -82,7 +82,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
   // Team admins, and Builders while "Builders may install catalog skills" is on (SK25); a Builder
   // never sets or changes Required and never installs a deprecated version.
   app.put("/installs/:skillId", requireTeamPermission("team.skills.publish"), async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const body = await parseBody(c, putTeamSkillInstallSchema);
     if (!id.success || !body)
       return invalidRequest(c, "Send a version, a pin mode and an access mode.");
@@ -99,7 +99,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
   // Updates of an install (KOBE-337, SK25): what runs, newer versions with changelog and eval
   // delta, whether the pin takes them, and the Roll back target. Any member reads them.
   app.get("/installs/:skillId/updates", requireTeamPermission("team.read"), async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
     const u = await skillInstallUpdates(db, c.get("team").id, id.data);
     return u ? c.json(u) : c.json(SKILL_INSTALL_MISSING, 404);
@@ -107,7 +107,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
 
   // The file diff from the running version to another published one.
   app.get("/installs/:skillId/diff", requireTeamPermission("team.read"), async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     const to = semverSchema.safeParse(c.req.query("to"));
     if (!id.success || !to.success) return invalidRequest(c, "Send ?to=<version>.");
     if (!deps.blobs)
@@ -116,15 +116,13 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
         503,
       );
     const d = await skillInstallDiff(db, deps.blobs, c.get("team").id, id.data, to.data);
-    return d
-      ? c.json(d)
-      : c.json({ code: "not_found", message: "No such install or version." }, 404);
+    return d ? c.json(d) : notFound(c, "not_found", "No such install or version.");
   });
 
   // Move pin and Roll back (KOBE-337, SK25): single audited acts that keep the pin mode and
   // access; the same rules as an install (Builders, withdrawn and revoked versions, blocks).
   const moveTo = async (c: Ctx, version: string, act: "move" | "rollback") => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
+    const id = param(c, "skillId", idSchema);
     if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
     // Pin mode and access are read under the install's lock inside (review-337 L4).
     const r = await installCatalogSkill(db, {
@@ -148,7 +146,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
     "/installs/:skillId/rollback",
     requireTeamPermission("team.skills.publish"),
     async (c) => {
-      const id = idSchema.safeParse(c.req.param("skillId"));
+      const id = param(c, "skillId", idSchema);
       if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
       const u = await skillInstallUpdates(db, c.get("team").id, id.data);
       if (!u) return c.json(SKILL_INSTALL_MISSING, 404);
@@ -168,7 +166,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
     "/installs/:skillId",
     requireTeamPermission("team.skills.installs.manage"),
     async (c) => {
-      const id = idSchema.safeParse(c.req.param("skillId"));
+      const id = param(c, "skillId", idSchema);
       const text = await c.req.text().catch(() => "");
       const body = uninstallSkillSchema.safeParse(parseOptionalJson(text));
       if (!id.success || !body.success)
@@ -187,7 +185,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
     "/removed-defaults/:skillId/reinstall",
     requireTeamPermission("team.skills.installs.manage"),
     async (c) => {
-      const id = idSchema.safeParse(c.req.param("skillId"));
+      const id = param(c, "skillId", idSchema);
       if (!id.success) return invalidRequest(c, "Unknown skill id.");
       const r = await reinstallDefault(db, {
         teamId: c.get("team").id,

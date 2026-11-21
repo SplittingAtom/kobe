@@ -11,6 +11,7 @@ import {
   type AgentStatus,
   type KobeDb,
   type KobeTx,
+  pgCodeOf,
 } from "@kobe/db";
 import { z } from "zod";
 import { recordAudit } from "../audit/record.js";
@@ -200,7 +201,7 @@ export async function createAgent(
     return await inLocation(db, location, (tx) => insertAgent(tx, location, input));
   } catch (err) {
     // Defensive: creates are serialized per location, so this needs a racing non-create write.
-    if (pgCode(err) === "23505") return { ok: false, error: "slug_taken" };
+    if (pgCodeOf(err) === "23505") return { ok: false, error: "slug_taken" };
     throw err;
   }
 }
@@ -444,9 +445,4 @@ export async function setAgentStatus(
     });
     return toRecord(location.scope, row);
   });
-}
-
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.cause?.code ?? e?.code;
 }

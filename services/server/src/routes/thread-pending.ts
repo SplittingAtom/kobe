@@ -5,10 +5,10 @@ import { withTeam } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { isMessageRun, threadRunRows } from "../runs/store.js";
-import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, notFound, param } from "../http/request.js";
 
 /**
  * One message the thread holds outside its entry tree: a queued run's message (D17, editable) or
@@ -44,7 +44,7 @@ export function threadPendingRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
   app.use(requireTeamPermission("team.chat"));
 
   app.get("/:id/pending-messages", async (c) => {
-    const parsed = uuidSchema.safeParse(c.req.param("id"));
+    const parsed = param(c, "id", uuidSchema);
     if (!parsed.success) return invalidRequest(c);
     const threadId = parsed.data;
     const teamId = c.get("team").id;
@@ -71,7 +71,7 @@ export function threadPendingRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
           })),
       } satisfies PendingMessages;
     });
-    if (!body) return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);
+    if (!body) return notFound(c, "thread_not_found", "No thread with that id.");
     return c.json(body);
   });
 

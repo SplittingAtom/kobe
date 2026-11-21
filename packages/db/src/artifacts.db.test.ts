@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb } from "./client.js";
 import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-129: artifact tables' constraints, cascades and legal-hold guards (probe suite: probe.db.test). */
 const app = createDb(inject("appUrl"), { max: 4 });
@@ -80,8 +81,7 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
   try {
     await promise;
   } catch (err) {
-    const e = err as { code?: string; cause?: { code?: string } };
-    return e.cause?.code ?? e.code;
+    return pgCodeOf(err);
   }
   return undefined;
 }

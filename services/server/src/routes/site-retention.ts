@@ -6,6 +6,7 @@ import type { ServerDeps } from "../deps.js";
 import { notifyAllTeams } from "../retention/notify.js";
 import { retentionPeriodSchema } from "../retention/periods.js";
 import { cancelMaximumPending, readMaximum, setMaximum } from "../retention/settings.js";
+import { readJson } from "../http/request.js";
 
 const bodySchema = z.strictObject({ maximum: retentionPeriodSchema });
 
@@ -23,7 +24,7 @@ export function siteRetentionRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
   app.get("/", async (c) => c.json({ ...(await readMaximum(db)), paused: deps.retentionPaused }));
 
   app.put("/", async (c) => {
-    const parsed = bodySchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = bodySchema.safeParse(await readJson(c, null));
     if (!parsed.success) {
       return c.json(
         { code: "invalid_request", message: "Send maximum: 30d, 90d, 1y or forever." },

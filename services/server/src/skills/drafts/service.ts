@@ -1,5 +1,5 @@
 import type { SkillImportOrigin } from "@kobe/protocol";
-import { withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { withTeam, type KobeDb, type KobeTx, isUniqueViolation } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { parseSkillMd } from "../skill-md.js";
 import { DRAFT_LIMITS, SKILL_MD_PATH, draftPathProblem, skeletonSkillMd } from "./files.js";
@@ -246,14 +246,7 @@ export async function writeDraftFile(
 
 /** The unique save target per (author, conversation, name) refused a rename (KOBE-442 H1). */
 export function isSyncNameClash(err: unknown): boolean {
-  const e = err as {
-    code?: unknown;
-    constraint?: unknown;
-    cause?: { code?: unknown; constraint?: unknown };
-  };
-  const code = e.cause?.code ?? e.code;
-  const constraint = e.cause?.constraint ?? e.constraint;
-  return code === "23505" && constraint === "skill_drafts_thread_sync_uq";
+  return isUniqueViolation(err, "skill_drafts_thread_sync_uq");
 }
 
 function writeFileInTx(

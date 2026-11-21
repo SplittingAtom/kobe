@@ -14,6 +14,7 @@ import {
   SYSTEM_ACTOR,
   type KobeDb,
   type KobeTx,
+  pgCodeOf,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import type { MfaRule } from "./schemas.js";
@@ -155,16 +156,6 @@ export async function getProvider(
   return row ? viewOf(row as Selected, s.publicUrl, s.settings) : undefined;
 }
 
-function pgCode(err: unknown): string | undefined {
-  let e: unknown = err;
-  for (let depth = 0; depth < 4 && e; depth++) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === "string") return code;
-    e = (e as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
 export type CreateOutcome =
   | { readonly ok: true; readonly provider: ProviderView }
   | { readonly ok: false; readonly failure: "slug_taken" | "credentials_unavailable" };
@@ -208,7 +199,7 @@ export async function createProvider(
       return { ok: true, provider };
     });
   } catch (error) {
-    if (pgCode(error) === "23505") return { ok: false, failure: "slug_taken" };
+    if (pgCodeOf(error) === "23505") return { ok: false, failure: "slug_taken" };
     throw error;
   }
 }

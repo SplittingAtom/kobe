@@ -4,13 +4,13 @@ import { asc, eq, siteRoles, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
 import {
   deactivateUser,
   reactivateUser,
   teamsLeftWithoutActiveAdmin,
 } from "../users/deactivation.js";
+import { invalidRequest, notFound, param, readJson } from "../http/request.js";
 
 const purgeBodySchema = z.strictObject({ confirmEmail: z.string().min(3).max(320) });
 
@@ -78,8 +78,7 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
       .from(users)
       .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
       .where(eq(users.id, userId));
-    if (!target)
-      return c.json({ code: "user_not_found", message: "No Kobe user with that id." }, 404);
+    if (!target) return notFound(c, "user_not_found", "No Kobe user with that id.");
     if (target.role === "owner") {
       return c.json(
         { code: "owner_cannot_be_deactivated", message: "Transfer ownership first." },
@@ -99,7 +98,7 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
    * approved before-state; the console sends no body).
    */
   async function expected(c: Context, want: "active" | "deactivated") {
-    const raw: unknown = await c.req.json().catch(() => ({}));
+    const raw: unknown = await readJson(c, {});
     const parsed = expectedStateSchema.safeParse(raw ?? {});
     if (!parsed.success) return { ok: false as const, response: invalidRequest(c) };
     const state = parsed.data.expectedState;
@@ -115,7 +114,7 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     );
 
   app.post("/:userId/deactivate", async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     if (!userId.success) return invalidRequest(c);
     const want = await expected(c, "active");
     if (!want.ok) return want.response;
@@ -135,7 +134,7 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   });
 
   app.post("/:userId/reactivate", async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     if (!userId.success) return invalidRequest(c);
     const want = await expected(c, "deactivated");
     if (!want.ok) return want.response;
@@ -155,9 +154,9 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
    * `legal_hold`). Same rules as deactivation for who may act on whom.
    */
   app.post("/:userId/portable-memory/purge", async (c) => {
-    const userId = idSchema.safeParse(c.req.param("userId"));
+    const userId = param(c, "userId", idSchema);
     if (!userId.success) return invalidRequest(c);
-    const body = purgeBodySchema.safeParse(await c.req.json().catch(() => null));
+    const body = purgeBodySchema.safeParse(await readJson(c, null));
     if (!body.success) return invalidRequest(c, "Type the person's email address to confirm.");
     const refused = await guard(c, userId.data, "purge");
     if (refused) return refused;
@@ -186,7 +185,7 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
           remaining: outcome.remaining,
         });
       case "not_found":
-        return c.json({ code: "user_not_found", message: "No Kobe user with that id." }, 404);
+        return notFound(c, "user_not_found", "No Kobe user with that id.");
       case "active":
         return c.json(
           { code: "user_active", message: "Deactivate the account before purging its memories." },

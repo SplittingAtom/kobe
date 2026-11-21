@@ -8,7 +8,7 @@ import {
   type NotificationKind,
   type SchedulePausedBy,
 } from "@kobe/protocol";
-import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { sql, withTeam, type KobeDb, type KobeTx, makeCursorCodec } from "@kobe/db";
 import { z } from "zod";
 
 /**
@@ -37,18 +37,15 @@ const cursorSchema = z.strictObject({
 });
 type Cursor = z.infer<typeof cursorSchema>;
 
+const noticeCursor = makeCursorCodec(cursorSchema);
+
 export function encodeCursor(cursor: Cursor): string {
-  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+  return noticeCursor.encode(cursor);
 }
 
 /** The cursor, or null when it is not one this server issued. */
 export function decodeCursor(raw: string): Cursor | null {
-  try {
-    const parsed = cursorSchema.safeParse(JSON.parse(Buffer.from(raw, "base64url").toString()));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
+  return noticeCursor.decode(raw) ?? null;
 }
 
 type Row = {

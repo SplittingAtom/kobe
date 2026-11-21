@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { KobeDb, KobeTx } from "../client.js";
 import { auditLog, type AuditActorKind } from "../schema/audit.js";
 import { AUDIT_EVENTS, isAuditAction, type AuditAction, type AuditTarget } from "./events.js";
+import { isLockTimeout } from "../pg-errors.js";
 
 /** Who performed the action. `id` is null for system events and unauthenticated attempts. */
 export interface AuditActor {
@@ -83,11 +84,6 @@ export class AuditBusyError extends Error {
 
 /** Applied to an audited transaction that has no lock timeout of its own. */
 export const AUDIT_LOCK_TIMEOUT = "5s";
-
-const pgCode = (err: unknown): string | undefined => {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.cause?.code ?? e?.code;
-};
 
 const uuid = z.uuid();
 export const USER_AGENT_MAX = 256;
@@ -188,7 +184,7 @@ export async function audit(tx: KobeTx, event: AuditEvent): Promise<AuditRecordR
     .returning({ id: auditLog.id, seq: auditLog.seq, at: auditLog.at, hash: auditLog.hash })
     .catch((err: unknown) => {
       // 55P03 lock_not_available: the chain lock (or a lock_timeout) expired.
-      throw pgCode(err) === "55P03" ? new AuditBusyError() : err;
+      throw isLockTimeout(err) ? new AuditBusyError() : err;
     });
   const [row] = rows;
   if (!row) throw new Error("audit: insert returned no row");

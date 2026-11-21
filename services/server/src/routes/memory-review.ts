@@ -26,9 +26,9 @@ import { MemoryStorageError } from "../memory/store.js";
 import { suggestSchema, suggestToEditors } from "../memory/suggestions/suggest.js";
 import { logger } from "../logger.js";
 import { proposeCandidate, proposeSchema } from "../memory/proposals/propose.js";
-import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { issueText, memoryRouteKit, refuseAgentWrites } from "./memory-items.js";
+import { invalidRequest } from "../http/request.js";
 
 const threadQuery = z.object({ thread_id: uuidSchema });
 

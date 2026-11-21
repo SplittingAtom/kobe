@@ -5,6 +5,7 @@ import { kobeOrigin } from "../connectors/oauth/client.js";
 import { finishFlow, startFlow, type OauthFlowDeps } from "../connectors/oauth/flow.js";
 import { DEFAULT_TIMEOUT_MS } from "../connectors/oauth/http.js";
 import type { ServerDeps } from "../deps.js";
+import { notFound, param } from "../http/request.js";
 
 const idSchema = z.uuid();
 const MESSAGES = {
@@ -44,8 +45,8 @@ export function connectorOauthRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.post("/:connectorId/oauth/start", async (c) => {
-    const id = idSchema.safeParse(c.req.param("connectorId"));
-    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    const id = param(c, "connectorId", idSchema);
+    if (!id.success) return notFound(c, "connector_not_available", "Not found.");
     const flow = flowDeps(deps);
     if (!flow) {
       return c.json(

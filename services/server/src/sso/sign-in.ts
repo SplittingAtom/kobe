@@ -10,6 +10,7 @@ import {
   ssoIdentities,
   users,
   type KobeDb,
+  pgErrorOf,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import type { AfterChangeDeps } from "../teams/after-change.js";
@@ -105,18 +106,6 @@ async function hasSiteRole(db: KobeDb, userId: string): Promise<boolean> {
   return row !== undefined;
 }
 
-function pgCode(err: unknown): { code?: string; constraint?: string } {
-  let e: unknown = err;
-  for (let depth = 0; depth < 4 && e; depth++) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === "string") {
-      return { code, constraint: String((e as { constraint?: unknown }).constraint ?? "") };
-    }
-    e = (e as { cause?: unknown }).cause;
-  }
-  return {};
-}
-
 /** Applies the values and refuses when the person is left with no team and no site role. */
 async function applyAccess(
   deps: AfterChangeDeps,
@@ -174,9 +163,9 @@ async function createJitUser(
       return { kind: "created", userId: user.id };
     });
   } catch (err) {
-    const { code, constraint } = pgCode(err);
-    if (code !== "23505") throw err;
-    return constraint?.startsWith("users_") ? { kind: "email_taken" } : { kind: "raced" };
+    const pg = pgErrorOf(err);
+    if (pg?.code !== "23505") throw err;
+    return pg.constraint?.startsWith("users_") ? { kind: "email_taken" } : { kind: "raced" };
   }
 }
 

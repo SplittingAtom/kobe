@@ -3,8 +3,9 @@ import type { KobeDb, TeamRole } from "@kobe/db";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { FEEDBACK_DEFAULT_WINDOW_DAYS, feedbackTotalsQuerySchema } from "@kobe/protocol";
 import { agentFeedbackTotals } from "../feedback/totals.js";
-import { forbidden, invalidRequest, notFound } from "./http.js";
+import { forbidden, notFound } from "./http.js";
 import type { ResolvedAgent } from "./version-routes.js";
+import { invalidRequest } from "../http/request.js";
 
 export interface FeedbackTotalsRouteOptions {
   readonly db: KobeDb;

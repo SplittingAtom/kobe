@@ -15,7 +15,7 @@ import {
 } from "@kobe/protocol";
 import { logger as rootLogger } from "../logger.js";
 import type { HubSubscriber, RunEventHub } from "./hub.js";
-import type { Page } from "./read.js";
+import type { Page, RunState } from "./read.js";
 
 export interface StreamTimings {
   /** `: keepalive` cadence; also the granularity of the stall, safety-read and revalidation checks. */
@@ -70,6 +70,70 @@ export function announcedEpilogue(event: KobeEvent): EpilogueState | undefined {
     : [];
   if (purposes.length === 0) return undefined;
   return { purposes, written: new Set(), completedAtMs: Date.parse(event.ts) };
+}
+
+/** An epilogue being waited for: what was announced, and which of its events were written since. */
+export interface EpilogueTracking {
+  readonly state: EpilogueState;
+  readonly written: ReadonlySet<KobeEventType>;
+}
+
+export interface RenderedPage {
+  /** The SSE frames to send ("" when nothing new). */
+  readonly text: string;
+  /** The last seq in `text` (unchanged when nothing new). */
+  readonly lastSent: number;
+  /** A terminal event without an epilogue was rendered: the stream ends after `text`. */
+  readonly terminal: boolean;
+  /** Epilogues announced in this page, each to be waited for from now. */
+  readonly announced: readonly EpilogueState[];
+  /** The epilogue tracked after this page (a new object when anything changed). */
+  readonly epilogue: EpilogueTracking | undefined;
+  /** The run's log goes on past `lastSent`: read again. */
+  readonly dirty: boolean;
+}
+
+/**
+ * One page of events as SSE text (KOBE-730, pure): events at or before `lastSent` are skipped;
+ * a terminal event ends the page unless its `run.completed` announces an epilogue, which is then
+ * tracked (events after it count as written for it).
+ */
+export function renderPage(
+  page: { readonly events: Page["events"]; readonly run: RunState },
+  lastSent: number,
+  epilogue: EpilogueTracking | undefined,
+): RenderedPage {
+  let text = "";
+  let sent = lastSent;
+  let terminal = false;
+  let tracking = epilogue;
+  const announced: EpilogueState[] = [];
+  for (const event of page.events) {
+    if (event.seq <= sent) continue;
+    text += formatSseEvent(event);
+    sent = event.seq;
+    if (tracking) {
+      tracking = { state: tracking.state, written: new Set([...tracking.written, event.type]) };
+    }
+    if (isKobeEventType(event.type) && isTerminalEventType(event.type)) {
+      const state = announcedEpilogue(event);
+      if (state) {
+        announced.push(state);
+        tracking = { state, written: new Set(state.written) };
+        continue;
+      }
+      terminal = true;
+      break;
+    }
+  }
+  return {
+    text,
+    lastSent: sent,
+    terminal,
+    announced,
+    epilogue: tracking,
+    dirty: page.run.lastSeq > sent,
+  };
 }
 
 export interface RunEventStreamInput {
@@ -134,7 +198,7 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
   let ticker: NodeJS.Timeout | undefined;
   // KOBE-234: after a `run.completed` that announces an epilogue, the stream stays open for the
   // announced events until each arrived or the window closed (then it ends, as after a terminal).
-  let epilogue: { state: EpilogueState; written: Set<KobeEventType> } | undefined;
+  let epilogue: EpilogueTracking | undefined;
   let epilogueTimer: NodeJS.Timeout | undefined;
 
   const signal = () => {
@@ -143,11 +207,15 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
     w?.();
   };
 
-  const waitForEpilogue = (state: EpilogueState) => {
-    epilogue = { state, written: new Set(state.written) };
+  const armEpilogueTimer = (state: EpilogueState) => {
     const left = state.completedAtMs + SERVER_CALL_EPILOGUE_MAX_MS - Date.now();
     epilogueTimer = setTimeout(signal, Math.max(0, left) + 1);
     epilogueTimer.unref();
+  };
+
+  const waitForEpilogue = (state: EpilogueState) => {
+    epilogue = { state, written: new Set(state.written) };
+    armEpilogueTimer(state);
   };
 
   const epilogueStillOpen = () =>
@@ -261,26 +329,15 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
           continue;
         }
         if (page.events.length > 0) {
-          let text = "";
-          for (const event of page.events) {
-            if (event.seq <= lastSent) continue;
-            text += formatSseEvent(event);
-            lastSent = event.seq;
-            epilogue?.written.add(event.type);
-            if (isKobeEventType(event.type) && isTerminalEventType(event.type)) {
-              const announced = announcedEpilogue(event);
-              if (announced) {
-                waitForEpilogue(announced);
-                continue;
-              }
-              endReason ??= "terminal";
-              break;
-            }
-          }
+          const rendered = renderPage({ events: page.events, run: page.run }, lastSent, epilogue);
+          lastSent = rendered.lastSent;
+          epilogue = rendered.epilogue;
+          for (const state of rendered.announced) armEpilogueTimer(state);
+          if (rendered.terminal) endReason ??= "terminal";
           if (epilogue && !epilogueStillOpen()) endReason ??= "terminal";
-          if (page.run.lastSeq > lastSent) dirty = true;
-          if (text) {
-            enqueue(ctrl, text);
+          if (rendered.dirty) dirty = true;
+          if (rendered.text) {
+            enqueue(ctrl, rendered.text);
             return;
           }
         }

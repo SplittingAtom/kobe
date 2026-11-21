@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { withTeam } from "@kobe/db";
+import { withTeam, isUniqueViolation } from "@kobe/db";
 import { PROJECT_FILES_MAX, promoteFolderRequestSchema } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -8,9 +8,9 @@ import { logger } from "../logger.js";
 import { decide, loadAccess } from "../projects/access.js";
 import { promoteFolder, type PromoteResult } from "../projects/promote.js";
 import { toProject } from "../projects/repository.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { DEFAULT_TEAM_MAX_OBJECTS, DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -85,9 +85,7 @@ function refusal(c: Ctx, r: Extract<PromoteResult, { status: "refused" }>): Resp
 }
 
 function isSlugConflict(err: unknown): boolean {
-  const e = err as { code?: string; constraint?: string; cause?: { code?: string } };
-  const cause = (e.cause ?? e) as { code?: string; constraint?: string };
-  return cause.code === "23505" && cause.constraint === "projects_slug_unique";
+  return isUniqueViolation(err, "projects_slug_unique");
 }
 
 /**

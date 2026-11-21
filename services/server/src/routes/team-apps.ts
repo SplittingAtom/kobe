@@ -10,7 +10,7 @@ import { checkAppTool } from "../apps/decide.js";
 import { appFrameDocument, mayLoadAppFrame } from "../connectors/app-frame.js";
 import { uuidSchema } from "../threads/schemas.js";
 import type { ServerDeps } from "../deps.js";
-import { parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /**
  * MCP Apps for members (KOBE-436, spec §6), under the browser principal: the signed-in member
@@ -105,7 +105,7 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     }
     const query = frameQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
     if (!query.success) {
-      return c.json({ code: "invalid_request", message: "Send team and sha256." }, 400);
+      return invalidRequest(c, "Send team and sha256.");
     }
     const teamId = c.get("team").id;
     if (query.data.team !== teamId) {

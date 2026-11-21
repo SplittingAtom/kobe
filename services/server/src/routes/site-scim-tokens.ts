@@ -11,6 +11,7 @@ import {
   SCIM_MAX_LIVE_TOKENS,
 } from "../sso/scim-tokens.js";
 import { idSchema } from "../teams/schemas.js";
+import { param } from "../http/request.js";
 
 const notFound = (c: Context, what = "single sign-on provider") =>
   c.json({ code: "not_found", message: `No such ${what}.` }, 404);
@@ -44,7 +45,7 @@ export function siteScimTokenRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
   app.use(requireSitePermission("site.users.manage"));
 
   async function providerOf(c: Context) {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     return id.success ? getProvider(deps.sso.providers, id.data) : undefined;
   }
 
@@ -97,7 +98,7 @@ export function siteScimTokenRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
   app.post("/providers/:id/scim/tokens/:tokenId/revoke", async (c) => {
     const provider = await providerOf(c);
     if (!provider) return notFound(c);
-    const tokenId = idSchema.safeParse(c.req.param("tokenId"));
+    const tokenId = param(c, "tokenId", idSchema);
     if (!tokenId.success) return notFound(c, "SCIM token");
     const revoked = await revokeScimToken(db, provider.id, tokenId.data);
     if (revoked.ok) return c.json({ credential: revoked.view });

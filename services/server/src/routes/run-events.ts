@@ -9,21 +9,9 @@ import { withTeam } from "@kobe/db";
 import { viewerProjectIds } from "../threads/references.js";
 import { canWatchThread } from "../event-stream/visibility.js";
 import { loadAdminResultGate, redactEvent } from "../threads/admin-redaction.js";
+import { SSE_HEADERS, nodeResponseDestroyer } from "../http/sse.js";
 
 const uuid = z.uuid();
-
-const SSE_HEADERS = {
-  "content-type": "text/event-stream; charset=utf-8",
-  "cache-control": "no-cache",
-  "x-accel-buffering": "no",
-} as const;
-
-/** Under @hono/node-server, `c.env.outgoing` is the Node response; destroying it drops the socket. */
-function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
-  const outgoing = (env as { outgoing?: { destroy?: unknown } } | undefined)?.outgoing;
-  if (!outgoing || typeof outgoing.destroy !== "function") return undefined;
-  return () => (outgoing.destroy as () => void).call(outgoing);
-}
 
 /**
  * Kobe Event Stream (spec §6.1 `GET /v1/runs/{id}/events`, §6.2, D16). Scoped to the active team

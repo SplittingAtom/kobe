@@ -14,6 +14,7 @@ import {
   users,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-177: notifications, their email outbox and skipped actions (spec D32). */
 type NewNotification = typeof notifications.$inferInsert;
@@ -22,7 +23,6 @@ let owner: KobeDatabase;
 const teamA = randomUUID();
 const teamB = randomUUID();
 const userId = randomUUID();
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 
 async function seed(teamId: string) {
   const scheduleId = randomUUID();
@@ -93,7 +93,7 @@ describe("notifications", () => {
     expect(await withTeam(app.db, teamB, (tx) => tx.select().from(notifications))).toEqual([]);
     await expect(
       withTeam(app.db, teamB, (tx) => tx.insert(notifications).values(note(teamA, s))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "42501");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "42501");
   });
 
   it("enforces kind and the thread/run/paused_by shape", async () => {
@@ -110,7 +110,7 @@ describe("notifications", () => {
     for (const row of bad) {
       await expect(
         withTeam(app.db, teamA, (tx) => tx.insert(notifications).values(row)),
-      ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+      ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
     }
     await withTeam(app.db, teamA, (tx) =>
       tx.insert(notifications).values({
@@ -128,7 +128,7 @@ describe("notifications", () => {
     await withTeam(app.db, teamA, (tx) => tx.insert(notifications).values(note(teamA, s)));
     await expect(
       withTeam(app.db, teamA, (tx) => tx.insert(notifications).values(note(teamA, s))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23505");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23505");
   });
 });
 
@@ -146,12 +146,12 @@ describe("notification_emails", () => {
     expect(e).toMatchObject({ status: "pending", attempts: 0, leaseUntil: null, sentAt: null });
     await expect(
       withTeam(app.db, teamA, (tx) => tx.insert(notificationEmails).values(mail)),
-    ).rejects.toSatisfy((x) => pgCode(x) === "23505");
+    ).rejects.toSatisfy((x) => pgCodeOf(x) === "23505");
     await expect(
       withTeam(app.db, teamA, (tx) =>
         tx.update(notificationEmails).set({ lastError: "Bad Text!" }),
       ),
-    ).rejects.toSatisfy((x) => pgCode(x) === "23514");
+    ).rejects.toSatisfy((x) => pgCodeOf(x) === "23514");
     expect(await withTeam(app.db, teamB, (tx) => tx.select().from(notificationEmails))).toEqual([]);
   });
 });
@@ -164,7 +164,7 @@ describe("run_skipped_actions", () => {
     );
     await expect(
       withTeam(app.db, teamA, (tx) => tx.insert(runSkippedActions).values(skip(teamA, s.runId))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23505");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23505");
     for (const bad of [
       { ...skip(teamA, s.runId, "c2"), riskClass: "nuclear" as "write" },
       { ...skip(teamA, s.runId, "c3"), tool: "" },
@@ -172,7 +172,7 @@ describe("run_skipped_actions", () => {
     ]) {
       await expect(
         withTeam(app.db, teamA, (tx) => tx.insert(runSkippedActions).values(bad)),
-      ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+      ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
     }
     expect(await withTeam(app.db, teamB, (tx) => tx.select().from(runSkippedActions))).toEqual([]);
   });
@@ -232,7 +232,7 @@ describe("removal with the thread (ac-2)", () => {
     }
     await expect(
       withTeam(app.db, teamA, (tx) => tx.delete(threads).where(eq(threads.id, s.threadId))),
-    ).rejects.toSatisfy((e) => pgCode(e) === "KH001");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "KH001");
     expect(await counts(s)).toEqual({ notes: 1, skips: 1 });
   });
 

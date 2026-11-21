@@ -13,6 +13,7 @@ import {
   type RunStatus,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * Conversation schema integrity (KOBE-29): Pi tree mirroring, gapless per-run seq, one active run
@@ -41,8 +42,7 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  return pgCodeOf(err) ?? String(err);
 }
 
 async function errorMessage(promise: Promise<unknown>): Promise<string> {

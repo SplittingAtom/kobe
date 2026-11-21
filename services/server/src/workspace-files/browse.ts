@@ -1,8 +1,9 @@
-import { sql, type KobeTx } from "@kobe/db";
+import { sql, type KobeTx, makeCursorCodec } from "@kobe/db";
 import type { WorkspaceFileEntry } from "@kobe/protocol";
 import type { WorkspaceOwner } from "../workspace-sync/keys.js";
 import type { StoredEntry } from "../workspace-sync/store.js";
 import { areaOf, baseName, underPattern } from "./paths.js";
+import { z } from "zod";
 
 /** Entries one page of a folder listing holds at most (more follow through `next_cursor`). */
 export const LIST_MAX_ENTRIES = 5000;
@@ -14,25 +15,18 @@ export interface ListPosition {
 }
 
 /** Opaque cursor: base64url JSON of the last entry's position. Not signed; it only names a position in the caller's own listing. */
+const positionCursor = makeCursorCodec(
+  z.object({ d: z.union([z.literal(0), z.literal(1)]), n: z.string().min(1).max(255) }),
+);
+
 export function encodeCursor(position: ListPosition): string {
-  return Buffer.from(JSON.stringify({ d: position.dir ? 1 : 0, n: position.name })).toString(
-    "base64url",
-  );
+  return positionCursor.encode({ d: position.dir ? 1 : 0, n: position.name });
 }
 
 /** The position a cursor names, or undefined when it is not one this server issues. */
 export function decodeCursor(cursor: string): ListPosition | undefined {
-  try {
-    const raw: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (typeof raw !== "object" || raw === null) return undefined;
-    const { d, n } = raw as { d?: unknown; n?: unknown };
-    if ((d !== 0 && d !== 1) || typeof n !== "string" || n === "" || n.length > 255) {
-      return undefined;
-    }
-    return { dir: d === 1, name: n };
-  } catch {
-    return undefined;
-  }
+  const raw = positionCursor.decode(cursor);
+  return raw && { dir: raw.d === 1, name: raw.n };
 }
 
 type ChildRow = {

@@ -10,11 +10,11 @@ import {
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest } from "../teams/http.js";
 import { linksOfThreads, threadsOfPaths } from "../thread-file-links/read.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, findThreads, type Viewer } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { invalidRequest, param } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -68,7 +68,7 @@ export function threadFileLinkRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.get("/:id/file-links", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success || new URL(c.req.url).search !== "") return invalidRequest(c);
     const links = await withTeam(db, c.get("team").id, async (tx) => {
       const viewer = await viewerOf(c, tx);

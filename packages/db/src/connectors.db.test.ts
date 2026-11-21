@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { connectors, teamConnectors, teamMembers, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-58: connector registry (site-wide) and team enablement (team table, RLS). */
 let app: KobeDatabase;
@@ -26,7 +27,6 @@ beforeAll(async () => {
 });
 afterAll(() => app.close());
 
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 const unique = () => randomUUID().slice(0, 8);
 
 async function insertConnector(name: string, url = "https://mcp.example.com/mcp") {
@@ -49,14 +49,14 @@ describe("connectors", () => {
     ["space", "my jira"],
     ["too long", "a".repeat(65)],
   ])("refuses a name with %s", async (_, name) => {
-    await expect(insertConnector(name)).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    await expect(insertConnector(name)).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
   });
 
   it("refuses names that differ only in - and _ (Pi treats them as one server)", async () => {
     const base = `dev-${unique()}`;
     await insertConnector(base);
     await expect(insertConnector(base.replace("-", "_"))).rejects.toSatisfy(
-      (e) => pgCode(e) === "23505",
+      (e) => pgCodeOf(e) === "23505",
     );
   });
 
@@ -66,7 +66,7 @@ describe("connectors", () => {
     ["file URL", "file:///etc/passwd"],
   ])("refuses a URL with %s", async (_, url) => {
     await expect(insertConnector(`u-${unique()}`, url)).rejects.toSatisfy(
-      (e) => pgCode(e) === "23514",
+      (e) => pgCodeOf(e) === "23514",
     );
   });
 });
@@ -98,7 +98,7 @@ describe("team_connectors", () => {
           .insert(teamConnectors)
           .values({ teamId: teamB, connectorId: connector.id, enabledBy: userId }),
       ),
-    ).rejects.toSatisfy((e) => pgCode(e) === "42501");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "42501");
   });
 
   it("goes away with the connector (deregistered)", async () => {

@@ -14,7 +14,7 @@ import {
 import { blobRecorder } from "../retention/job.js";
 import { isLockTimeout } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
-import { invalidRequest } from "../teams/http.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const ERRORS = {
   thread_not_found: [404, "No thread with that id."],
@@ -46,7 +46,7 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
   app.use(requireTeamPermission("team.chat"));
 
   app.post("/:id/purge", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const teamId = c.get("team").id;
     let result;
@@ -113,7 +113,7 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
   app.get("/:id/export", async (c) => {
     const refused = refuseDownload(c, deps.publicUrl);
     if (refused) return refused;
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c);
     const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
     if (!claimExport(viewer.userId)) return exportInProgress(c);

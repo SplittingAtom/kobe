@@ -16,6 +16,7 @@ import {
   type SnippetSegment,
 } from "./thread-search-format.js";
 import { ThreadSearchError } from "./thread-search-error.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 export { ThreadSearchError, type ThreadSearchErrorCode } from "./thread-search-error.js";
 export {
@@ -179,7 +180,7 @@ async function runBounded<T>(
     });
   } catch (err) {
     if (err instanceof ThreadSearchError) throw err;
-    const sqlState = sqlStateOf(err);
+    const sqlState = pgCodeOf(err);
     if (sqlState && TIMEOUT_SQLSTATES.has(sqlState)) {
       throw new ThreadSearchError("timeout", `timed out after ${timeoutMs} ms`, sqlState);
     }
@@ -189,13 +190,6 @@ async function runBounded<T>(
       sqlState,
     );
   }
-}
-
-/** SQLSTATE of a driver error (drizzle wraps it in `cause`). */
-function sqlStateOf(err: unknown): string | undefined {
-  const e = err as { code?: unknown; cause?: { code?: unknown } } | null;
-  const code = e?.cause?.code ?? e?.code;
-  return typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
 }
 
 /** The team set by withTeam; refuses to run without one rather than silently finding nothing. */

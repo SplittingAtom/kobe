@@ -7,7 +7,6 @@ import {
   etag,
   forbidden,
   ifMatchRevision,
-  invalidRequest,
   notFound,
   publishError,
   versionDetail,
@@ -40,11 +39,11 @@ import type { EvalRunner } from "./eval/service.js";
 import { versionScores } from "./eval/store.js";
 import { logger } from "../logger.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { parseBody } from "../teams/http.js";
 import { agentSkills, agentWarnings, isDangerousMode } from "@kobe/agent-file";
 import { DANGEROUS_FORBIDDEN } from "../policy/dangerous-mode.js";
 import { EMPTY_SKILL_MANIFEST } from "../skills/frozen.js";
 import { skillUpdates } from "./skill-freeze.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 /**
  * Runs `fn`; a stored version whose manifest doesn't parse answers 500 `version_unreadable` (fail
@@ -185,7 +184,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
   app.get("/:id/versions/:version", async (c) => {
     const found = await resolveRead(c);
     if (!found) return notFound(c);
-    const version = versionParamSchema.safeParse(c.req.param("version"));
+    const version = param(c, "version", versionParamSchema);
     if (!version.success) return invalidRequest(c, "The version must be a positive number.");
     if (!found.access.readDefinition) {
       return forbidden(c, "Your team role doesn't allow reading team agent definitions.");

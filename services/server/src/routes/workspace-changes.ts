@@ -7,21 +7,9 @@ import type { ServerDeps } from "../deps.js";
 import { createWorkspaceChangeStream } from "../workspace-files/change-stream.js";
 import { readFileChanges } from "../workspace-files/changes.js";
 import { isInternalPath } from "../workspace-files/paths.js";
+import { SSE_HEADERS, nodeResponseDestroyer } from "../http/sse.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
-
-export const SSE_HEADERS = {
-  "content-type": "text/event-stream; charset=utf-8",
-  "cache-control": "no-cache",
-  "x-accel-buffering": "no",
-} as const;
-
-/** Under @hono/node-server, `c.env.outgoing` is the Node response; destroying it drops the socket. */
-export function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
-  const outgoing = (env as { outgoing?: { destroy?: unknown } } | undefined)?.outgoing;
-  if (!outgoing || typeof outgoing.destroy !== "function") return undefined;
-  return () => (outgoing.destroy as () => void).call(outgoing);
-}
 
 /** The query as the contract reads it: `path` repeats; any other parameter is refused. */
 function parseQuery(c: Ctx) {

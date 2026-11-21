@@ -20,9 +20,9 @@ import {
   createManifestDraft,
   type ManifestDraftResult,
 } from "../skills/registry/promote-manifest.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { draftJson } from "./skill-drafts.js";
 import { LICENSE_PATTERN } from "@kobe/protocol";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -234,10 +234,10 @@ export function teamSkillPromotionRoutes(
   app.get("/:id", async (c) => {
     const p = depsOf(deps);
     if (!p) return c.json(UNAVAILABLE, 503);
-    const id = idSchema.safeParse(c.req.param("id"));
-    if (!id.success) return c.json({ code: "not_found", message: "No such request." }, 404);
+    const id = param(c, "id", idSchema);
+    if (!id.success) return notFound(c, "not_found", "No such request.");
     const preview = await requestPreview(p, c.get("team").id, id.data);
-    if (!preview) return c.json({ code: "not_found", message: "No such open request." }, 404);
+    if (!preview) return notFound(c, "not_found", "No such open request.");
     if (!preview.prepared.ok)
       return c.json({
         request: preview.request,
@@ -250,8 +250,8 @@ export function teamSkillPromotionRoutes(
   app.post("/:id/confirm", async (c) => {
     const p = depsOf(deps);
     if (!p) return c.json(UNAVAILABLE, 503);
-    const id = idSchema.safeParse(c.req.param("id"));
-    if (!id.success) return c.json({ code: "not_found", message: "No such request." }, 404);
+    const id = param(c, "id", idSchema);
+    if (!id.success) return notFound(c, "not_found", "No such request.");
     return answer(
       c,
       await confirmRequest(p, c.get("team").id, id.data, c.get("user").id),
@@ -261,7 +261,7 @@ export function teamSkillPromotionRoutes(
   });
 
   app.post("/:id/decline", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     const body = await parseBody(c, declineSchema);
     if (!id.success || !body)
       return invalidRequest(c, "Send an optional note (up to 1000 characters).");
@@ -272,7 +272,7 @@ export function teamSkillPromotionRoutes(
       c.get("user").id,
       body.note ?? null,
     );
-    if (r === "not_found") return c.json({ code: "not_found", message: "No such request." }, 404);
+    if (r === "not_found") return notFound(c, "not_found", "No such request.");
     if (r === "closed")
       return c.json(
         { code: "request_closed", message: "Another Team admin already decided this request." },

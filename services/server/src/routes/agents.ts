@@ -24,7 +24,6 @@ import {
   etag,
   exportResponse,
   forbidden,
-  invalidRequest,
   notFound,
   preconditionFailed,
   readAgentInput,
@@ -69,7 +68,7 @@ import { DANGEROUS_FORBIDDEN, mayUseDangerousMode } from "../policy/dangerous-mo
 import { teamRoleAllows } from "../authz/permissions.js";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -125,7 +124,7 @@ export function agentRoutes(
 
   /** The agent if the caller may see it; null → 404 (no existence oracle). */
   async function visible(c: Ctx): Promise<AgentRecord | null> {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     if (!id.success) return null;
     const agent = await findVisibleAgent(
       db,
@@ -196,7 +195,7 @@ export function agentRoutes(
     if (!teamRoleAllows(c.get("team").role, "team.agents.suspend")) {
       return forbidden(c, "Only team admins suspend agents.");
     }
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     const body = await parseBody(c, agentStatusSchema);
     if (!body) return invalidRequest(c, "status must be active or suspended.");
     if (!id.success) return notFound(c);
@@ -235,7 +234,7 @@ export function agentRoutes(
 
   /** Someone else's personal agent read from a roster (KOBE-571, AR14), or null. */
   async function rosterRead(c: Ctx) {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     if (!id.success) return null;
     // `?from=site` (the Site tab's View) shows the site entry's version in effect (KOBE-571).
     const from = c.req.query("from") === "site" ? "site" : "team";
@@ -277,7 +276,7 @@ export function agentRoutes(
 
   /** The recipient of a pending transfer reads the offered agent's summary with the offer. */
   async function offeredAgent(c: Ctx): Promise<Response> {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     const transfer = id.success ? await pendingTransfer(db, id.data) : null;
     if (!transfer || transfer.toUserId !== c.get("user").id) return notFound(c);
     const offered = await findAgent(
@@ -364,7 +363,7 @@ export function agentRoutes(
    * and, for team content, bound to that team.
    */
   app.post("/:id/fork", async (c) => {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     if (!id.success) return notFound(c);
     const body = await parseBody(c, forkSchema);
     if (!body) return invalidRequest(c, "Give optionally a slug.");

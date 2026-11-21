@@ -24,13 +24,13 @@ import {
   domainPatternSchema,
   presetSchema,
 } from "../egress/schemas.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody, readJson } from "../http/request.js";
 
 const statusQuerySchema = z.enum(["pending", "approved", "denied", "all"]).default("pending");
 
 /** Parses a JSON body; the 400 names the first problem without echoing input. */
 async function body<T>(c: Context, schema: z.ZodType<T>) {
-  const parsed = schema.safeParse(await c.req.json().catch(() => null));
+  const parsed = schema.safeParse(await readJson(c, null));
   if (parsed.success) return { ok: true as const, value: parsed.data };
   const message = parsed.error.issues[0]?.message ?? "invalid";
   return { ok: false as const, response: invalidRequest(c, `Check the request: ${message}.`) };
@@ -80,7 +80,7 @@ export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   });
 
   app.put("/presets/:preset", async (c) => {
-    const preset = presetSchema.safeParse(c.req.param("preset"));
+    const preset = param(c, "preset", presetSchema);
     if (!preset.success)
       return c.json({ code: "preset_not_found", message: "No such preset." }, 404);
     const parsed = await body(c, ceilingMembershipBodySchema);
@@ -98,8 +98,8 @@ export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
 
   // The same decision as the card's, as a site admin, for any team's request (EA2, EA3).
   app.post("/requests/:teamId/:id/decision", async (c) => {
-    const teamId = z.uuid().safeParse(c.req.param("teamId"));
-    const id = z.uuid().safeParse(c.req.param("id"));
+    const teamId = param(c, "teamId", z.uuid());
+    const id = param(c, "id", z.uuid());
     const parsed = await parseBody(c, decisionWithPatternBodySchema);
     if (!parsed) return invalidRequest(c, DECISION_BODY_HINT);
     if (!teamId.success || !id.success) {
@@ -117,7 +117,7 @@ export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   });
 
   app.put("/:domain", async (c) => {
-    const domain = domainPatternSchema.safeParse(c.req.param("domain"));
+    const domain = param(c, "domain", domainPatternSchema);
     if (!domain.success) return notFound(c);
     const parsed = await body(c, ceilingFlagsBodySchema);
     if (!parsed.ok) return parsed.response;
@@ -139,7 +139,7 @@ export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   });
 
   app.delete("/:domain", async (c) => {
-    const domain = domainPatternSchema.safeParse(c.req.param("domain"));
+    const domain = param(c, "domain", domainPatternSchema);
     if (!domain.success) return notFound(c);
     const result = await deleteCeilingDomain(db, domain.data);
     if (result === "deleted") return c.body(null, 204);

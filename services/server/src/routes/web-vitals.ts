@@ -4,7 +4,7 @@ import { recordSpan } from "@kobe/telemetry";
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /**
  * Web Vitals from the browser (KOBE-525): `POST /v1/telemetry/web-vitals`, mounted on

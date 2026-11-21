@@ -34,10 +34,10 @@ import { commitDetail, fileAt, headZip, historyPage, servable } from "../project
 import type { TreeFile } from "../projects/tree.js";
 import { storageSettingsSchema, storageView, writeStorageSettings } from "../projects/storage.js";
 import { logger } from "../logger.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { DEFAULT_TEAM_MAX_OBJECTS, DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import { attachmentDisposition } from "../workspace-files/paths.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 type ProjectAction = "view" | "edit" | "manage";
@@ -192,7 +192,7 @@ export function projectCommitRoutes(
     fn: (tx: KobeTx, access: ProjectAccess) => Promise<Response>,
     lock = false,
   ): Promise<Response> => {
-    const id = idParam.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParam);
     if (!id.success) return notFound(c);
     return withTeam(db, c.get("team").id, async (tx) => {
       const access = await loadAccess(tx, owner(c), id.data, { lock });
@@ -267,7 +267,7 @@ export function projectCommitRoutes(
   );
 
   app.post("/:id/commit", async (c) => {
-    const id = idParam.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParam);
     if (!id.success) return notFound(c);
     const body = await parseBody(c, commitProjectRequestSchema);
     if (!body) return invalidRequest(c, "Give a message (1 to 500 characters).");
@@ -286,7 +286,7 @@ export function projectCommitRoutes(
    * conversation's project; the recorded content is committed (never content from the request).
    */
   app.post("/:id/commits/from-proposal", async (c) => {
-    const id = idParam.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParam);
     if (!id.success) return notFound(c);
     const body = await parseBody(c, commitFromProposalRequestSchema);
     if (!body) {
@@ -322,7 +322,7 @@ export function projectCommitRoutes(
   });
 
   app.get("/:id/commits/:seq", (c) => {
-    const seq = seqParam.safeParse(c.req.param("seq"));
+    const seq = param(c, "seq", seqParam);
     if (!seq.success) return Promise.resolve(commitAnswer(c, { status: "commit_not_found" }));
     return withProject(c, "view", async (tx, access) => {
       const detail = await commitDetail(tx, access.project.teamId, access.project.id, seq.data);
@@ -331,7 +331,7 @@ export function projectCommitRoutes(
   });
 
   app.get("/:id/commits/:seq/files/*", async (c) => {
-    const seq = seqParam.safeParse(c.req.param("seq"));
+    const seq = param(c, "seq", seqParam);
     const marker = `/commits/${c.req.param("seq") ?? ""}/files/`;
     const raw = c.req.path.slice(c.req.path.indexOf(marker) + marker.length);
     let decoded: string;
@@ -369,8 +369,8 @@ export function projectCommitRoutes(
   });
 
   app.post("/:id/commits/:seq/revert", async (c) => {
-    const id = idParam.safeParse(c.req.param("id"));
-    const seq = seqParam.safeParse(c.req.param("seq"));
+    const id = param(c, "id", idParam);
+    const seq = param(c, "seq", seqParam);
     if (!id.success) return notFound(c);
     if (!seq.success) return commitAnswer(c, { status: "commit_not_found" });
     const body = await parseBody(c, revertProjectRequestSchema);

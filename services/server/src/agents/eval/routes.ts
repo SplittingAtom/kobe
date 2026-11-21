@@ -1,9 +1,10 @@
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import type { KobeDb } from "@kobe/db";
-import { forbidden, invalidRequest, notFound } from "../http.js";
+import { forbidden, notFound } from "../http.js";
 import type { ResolvedAgent } from "../version-routes.js";
 import { getEval, listAgentEvals, type EvalRecord } from "./store.js";
+import { invalidRequest, param } from "../../http/request.js";
 
 /** What the API says about an eval; the full report only on the detail endpoint. */
 export function evalView(e: EvalRecord, withReport = false) {
@@ -70,7 +71,7 @@ export function mountEvalRoutes<E extends { Variables: object }>(
     const found = await options.resolve(c);
     if (!found) return notFound(c);
     if (!found.access.readDefinition) return forbidden(c, "You can't read this agent's evals.");
-    const id = evalIdSchema.safeParse(c.req.param("evalId"));
+    const id = param(c, "evalId", evalIdSchema);
     if (!id.success) return invalidRequest(c, "The eval id must be a uuid.");
     const record = await getEval(db, options.teamId(c), id.data);
     if (!record || record.agentId !== found.agent.id) return notFound(c);

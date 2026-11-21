@@ -20,12 +20,11 @@ import {
   teams,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-618 (KA-1): the built-in `kobe` connector row, the site switch, and audit `via`. */
 const app = createDb(inject("appUrl"), { max: 8 });
 afterAll(() => app.close());
-
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 
 describe("the built-in kobe connector row", () => {
   it("is seeded once however many replicas seed it at the same time", async () => {
@@ -56,7 +55,7 @@ describe("the built-in kobe connector row", () => {
       app.db
         .insert(connectors)
         .values({ name: `fake-${randomUUID().slice(0, 8)}`, url: KOBE_BUILTIN_CONNECTOR_URL }),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
   });
 
   it("refuses a built-in row with another id, URL, credential or a pinned snapshot", async () => {
@@ -77,14 +76,14 @@ describe("the built-in kobe connector row", () => {
         .insert(connectors)
         .values({ name: name(), builtin: "kobe", ...values })
         .then(() => "inserted")
-        .catch((e: unknown) => pgCode(e));
+        .catch((e: unknown) => pgCodeOf(e));
       expect(["23514", "23505"], JSON.stringify(values)).toContain(code);
     }
     await expect(
       app.db.execute(
         sql`UPDATE connectors SET url = 'https://evil.example.com/mcp' WHERE builtin = 'kobe'`,
       ),
-    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    ).rejects.toSatisfy((e) => pgCodeOf(e) === "23514");
   });
 });
 

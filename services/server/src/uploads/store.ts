@@ -6,7 +6,7 @@ import {
   type UploadErrorCode,
   type UploadResponse,
 } from "@kobe/protocol";
-import { files, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { files, sql, withTeam, type KobeDb, type KobeTx, pgCodeOf } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
@@ -232,12 +232,6 @@ interface Stored {
   readonly scan: "none" | "clean";
 }
 
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: unknown; cause?: { code?: unknown } };
-  const code = e.cause?.code ?? e.code;
-  return typeof code === "string" ? code : undefined;
-}
-
 async function commit(
   deps: UploadDeps,
   caller: UploadCaller,
@@ -360,7 +354,7 @@ export async function storeUpload(
       await auditRefused(deps, caller, "quota_exceeded", size);
       return OBJECT_BUDGET;
     }
-    if (pgCode(err) === "23503") return THREAD_NOT_FOUND;
+    if (pgCodeOf(err) === "23503") return THREAD_NOT_FOUND;
     logger.error({ err, teamId }, "upload could not be recorded");
     return STORAGE_UNAVAILABLE;
   }

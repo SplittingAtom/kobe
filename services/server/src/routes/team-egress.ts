@@ -10,7 +10,7 @@ import { decideAndRespond } from "../egress/decision-http.js";
 import { listTeamEgressRequests } from "../egress/request-store.js";
 import { domainPatternSchema } from "../egress/schemas.js";
 import { disableTeamDomain, enableTeamDomain, listTeamEgress } from "../egress/team-store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const notFound = (c: Context) =>
   c.json({ code: "domain_not_found", message: "That domain is not enabled." }, 404);
@@ -53,7 +53,7 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.put("/domains/:domain", requireTeamPermission("team.egress.manage"), async (c) => {
-    const domain = domainPatternSchema.safeParse(c.req.param("domain"));
+    const domain = param(c, "domain", domainPatternSchema);
     if (!domain.success) return notInCeiling(c);
     const teamId = c.get("team").id;
     const { result, settled } = await enableTeamDomain(db, teamId, domain.data, c.get("user").id);
@@ -79,7 +79,7 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.delete("/domains/:domain", requireTeamPermission("team.egress.manage"), async (c) => {
-    const domain = domainPatternSchema.safeParse(c.req.param("domain"));
+    const domain = param(c, "domain", domainPatternSchema);
     if (!domain.success) return notFound(c);
     // `?expected=enabled_without_headers` (KOBE-621): never delete injected header values.
     const withoutHeaders = c.req.query("expected") === "enabled_without_headers";
@@ -109,7 +109,7 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
         503,
       );
     }
-    const domain = domainPatternSchema.safeParse(c.req.param("domain"));
+    const domain = param(c, "domain", domainPatternSchema);
     if (!domain.success) return notFound(c);
     if (domain.data.startsWith("*.")) {
       // Headers go to exactly one host: on a wildcard the sandbox could pick a subdomain it controls.
@@ -141,7 +141,7 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.delete("/domains/:domain/headers", requireTeamPermission("team.egress.manage"), async (c) => {
-    const domain = domainPatternSchema.safeParse(c.req.param("domain"));
+    const domain = param(c, "domain", domainPatternSchema);
     if (!domain.success) return notFound(c);
     const result = await clearTeamDomainHeaders(db, {
       teamId: c.get("team").id,
@@ -161,7 +161,7 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.post("/requests/:id", requireTeamPermission("team.egress.manage"), async (c) => {
-    const id = z.uuid().safeParse(c.req.param("id"));
+    const id = param(c, "id", z.uuid());
     const body = await parseBody(c, decisionBodySchema);
     if (!body) return invalidRequest(c, 'Send {"decision": "approve" | "deny"}.');
     if (!id.success) {

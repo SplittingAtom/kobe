@@ -14,6 +14,7 @@ import {
 } from "./egress/index.js";
 import { egressDomains, teamEgress, teamMembers, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-38: egress ceiling (site-wide) and team enablement (team table, RLS). */
 let app: KobeDatabase;
@@ -36,8 +37,6 @@ beforeAll(async () => {
   );
 });
 afterAll(() => app.close());
-
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 
 describe("egress ceiling", () => {
   it("ships the presets: registries in the ceiling, git hosts listed but out of it", async () => {
@@ -67,7 +66,7 @@ describe("egress ceiling", () => {
           () => undefined,
           (e: unknown) => e,
         );
-      expect(pgCode(err), bad).toBe("23514");
+      expect(pgCodeOf(err), bad).toBe("23514");
     }
   });
 
@@ -93,14 +92,14 @@ describe("team enablement", () => {
       () => undefined,
       (e: unknown) => e,
     );
-    expect(pgCode(fk)).toBe("23503");
+    expect(pgCodeOf(fk)).toBe("23503");
     const rls = await withTeam(app.db, teamB, (tx) =>
       tx.insert(teamEgress).values({ teamId: teamA, domain: "pypi.org", enabledBy: userId }),
     ).then(
       () => undefined,
       (e: unknown) => e,
     );
-    expect(pgCode(rls)).toBe("42501");
+    expect(pgCodeOf(rls)).toBe("42501");
   });
 
   it("deleting a custom ceiling domain removes every team's enablement of it", async () => {
@@ -175,6 +174,6 @@ describe("injected headers (KOBE-39)", () => {
           sql`UPDATE team_egress SET headers_sealed = NULL WHERE team_id = ${teamA} AND domain = ${d}`,
         ),
       ),
-    ).rejects.toSatisfy((err: unknown) => pgCode(err) === "23514");
+    ).rejects.toSatisfy((err: unknown) => pgCodeOf(err) === "23514");
   });
 });

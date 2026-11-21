@@ -10,8 +10,8 @@ import {
   listSiteMappings,
   parseCreateMapping,
 } from "../sso/mappings.js";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param, readJson } from "../http/request.js";
 
 const NOT_FOUND = {
   provider_not_found: "No single sign-on provider with that id.",
@@ -32,7 +32,7 @@ export function siteSsoMappingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   // is mounted before them, so it applies the kill switch itself (review finding 7).
   const killSwitch = createMiddleware(async (c, next) => {
     if (!deps.sso.settings.enabled) {
-      return c.json({ code: "not_found", message: "Not found." }, 404);
+      return notFound(c, "not_found", "Not found.");
     }
     c.header("Cache-Control", "no-store");
     await next();
@@ -48,9 +48,9 @@ export function siteSsoMappingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   app.post("/providers/:providerId/mappings", manage, async (c) => {
-    const providerId = idSchema.safeParse(c.req.param("providerId"));
+    const providerId = param(c, "providerId", idSchema);
     if (!providerId.success) return invalidRequest(c);
-    const body = parseCreateMapping(await c.req.json().catch(() => null));
+    const body = parseCreateMapping(await readJson(c, null));
     if (!body.ok) {
       return body.error === "site_role_not_mappable"
         ? c.json(
@@ -73,11 +73,11 @@ export function siteSsoMappingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   app.delete("/providers/:providerId/mappings/:mappingId", manage, async (c) => {
-    const providerId = idSchema.safeParse(c.req.param("providerId"));
-    const mappingId = idSchema.safeParse(c.req.param("mappingId"));
+    const providerId = param(c, "providerId", idSchema);
+    const mappingId = param(c, "mappingId", idSchema);
     if (!providerId.success || !mappingId.success) return invalidRequest(c);
     if (!(await deleteMapping(db, providerId.data, mappingId.data))) {
-      return c.json({ code: "mapping_not_found", message: NOT_FOUND.mapping_not_found }, 404);
+      return notFound(c, "mapping_not_found", NOT_FOUND.mapping_not_found);
     }
     return c.body(null, 204);
   });

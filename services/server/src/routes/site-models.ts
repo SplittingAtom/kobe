@@ -22,16 +22,16 @@ import {
   updateCatalogSchema,
   updateProviderSchema,
 } from "../models/schemas.js";
-import { invalidRequest } from "../teams/http.js";
 import {
   listProviderModels,
   refreshProviderModels,
   type DiscoveryResult,
 } from "../models/discovery.js";
+import { invalidRequest, param, readJson } from "../http/request.js";
 
 /** Parses a JSON body; the 400 names the first problem without echoing input (API keys). */
 async function body<T>(c: Context, schema: z.ZodType<T>) {
-  const parsed = schema.safeParse(await c.req.json().catch(() => null));
+  const parsed = schema.safeParse(await readJson(c, null));
   if (parsed.success) return { ok: true as const, value: parsed.data };
   const message = parsed.error.issues[0]?.message ?? "invalid";
   return { ok: false as const, response: invalidRequest(c, `Check the request: ${message}.`) };
@@ -168,7 +168,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     if (!deps.models) {
       return err(c, 503, "models_not_configured", "The model gateway is not configured.");
     }
-    const id = providerIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", providerIdSchema);
     if (!id.success) return providerNotFound(c);
     const parsed = await body(c, updateProviderSchema);
     if (!parsed.ok) return parsed.response;
@@ -203,7 +203,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   });
 
   app.delete("/providers/:id", async (c) => {
-    const id = providerIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", providerIdSchema);
     if (!id.success) return providerNotFound(c);
     const result = await deleteProvider(db, id.data);
     if (result === "deleted") return c.body(null, 204);
@@ -221,7 +221,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     if (!discovery) {
       return err(c, 503, "models_not_configured", "The model gateway is not configured.");
     }
-    const id = providerIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", providerIdSchema);
     if (!id.success) return providerNotFound(c);
     return discoveryResponse(c, await listProviderModels(db, discovery, id.data));
   });
@@ -232,7 +232,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     if (!discovery) {
       return err(c, 503, "models_not_configured", "The model gateway is not configured.");
     }
-    const id = providerIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", providerIdSchema);
     if (!id.success) return providerNotFound(c);
     return discoveryResponse(c, await refreshProviderModels(db, discovery, id.data));
   });
@@ -259,7 +259,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   });
 
   app.patch("/catalog/:alias", async (c) => {
-    const alias = aliasSchema.safeParse(c.req.param("alias"));
+    const alias = param(c, "alias", aliasSchema);
     if (!alias.success) return aliasNotFound(c);
     const parsed = await body(c, updateCatalogSchema);
     if (!parsed.ok) return parsed.response;
@@ -282,7 +282,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
   });
 
   app.delete("/catalog/:alias", async (c) => {
-    const alias = aliasSchema.safeParse(c.req.param("alias"));
+    const alias = param(c, "alias", aliasSchema);
     if (!alias.success) return aliasNotFound(c);
     return (await deleteCatalogEntry(db, alias.data)) ? c.body(null, 204) : aliasNotFound(c);
   });

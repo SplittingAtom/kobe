@@ -7,6 +7,7 @@ import {
   sql,
   type KobeDb,
   type KobeTx,
+  makeCursorCodec,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { hashGroups } from "./hash-checks.js";
@@ -59,22 +60,14 @@ export async function isBlocked(tx: KobeTx, hash: string): Promise<boolean> {
 
 const PAGE_MAX = 200;
 
-interface Cursor {
-  /** `added_at` as Postgres prints it (microseconds survive). */
-  readonly at: string;
-  readonly hash: string;
-}
+/** Keyset position: `added_at` as Postgres prints it (microseconds survive) and the hash. */
 const cursorSchema = z.object({ at: z.string().max(40), hash: z.string().length(64) });
-const encode = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString("base64url");
+type Cursor = z.infer<typeof cursorSchema>;
+export const blockCursor = makeCursorCodec(cursorSchema);
 
 /** Undefined for a malformed cursor (a 400 for the caller). */
 export function decodeBlockCursor(value: string): Cursor | undefined {
-  try {
-    const parsed = cursorSchema.safeParse(JSON.parse(Buffer.from(value, "base64url").toString()));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
+  return blockCursor.decode(value);
 }
 
 export interface BlockPage {
@@ -110,7 +103,9 @@ export async function listBlocked(
   return {
     entries: shown.map(({ at: _at, ...entry }) => entry),
     nextCursor:
-      rows.length > limit && last ? encode({ at: last.at, hash: last.contentHash }) : null,
+      rows.length > limit && last
+        ? blockCursor.encode({ at: last.at, hash: last.contentHash })
+        : null,
   };
 }
 

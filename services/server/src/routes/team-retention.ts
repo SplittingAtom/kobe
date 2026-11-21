@@ -5,7 +5,7 @@ import type { ServerDeps } from "../deps.js";
 import { notifyShortening } from "../retention/notify.js";
 import { allowedPeriods, retentionPeriodSchema, type RetentionView } from "../retention/periods.js";
 import { cancelTeamPending, readRetention, setTeamPeriod } from "../retention/settings.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 const bodySchema = z.strictObject({ period: retentionPeriodSchema });
 

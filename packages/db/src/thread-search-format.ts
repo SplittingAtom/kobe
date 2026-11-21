@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { makeCursorCodec } from "./cursor-codec.js";
 
 /** Limits of `searchThreads` (KOBE-33). */
 export const THREAD_SEARCH_DEFAULT_LIMIT = 20;
@@ -95,22 +96,16 @@ const cursorSchema = z.strictObject({
   i: uuid,
 });
 
+const searchCursor = makeCursorCodec(cursorSchema);
+
 export function encodeCursor(cursor: SearchCursor): string {
-  const json = JSON.stringify({ s: cursor.score, a: cursor.activityMicros, i: cursor.id });
-  return Buffer.from(json, "utf8").toString("base64url");
+  return searchCursor.encode({ s: cursor.score, a: cursor.activityMicros, i: cursor.id });
 }
 
 /** Decodes a cursor from `encodeCursor`; null when it is malformed or tampered with. */
 export function decodeCursor(encoded: string): SearchCursor | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
-  const parsed = cursorSchema.safeParse(value);
-  if (!parsed.success) return null;
-  return { score: parsed.data.s, activityMicros: parsed.data.a, id: parsed.data.i };
+  const cursor = searchCursor.decode(encoded);
+  return cursor ? { score: cursor.s, activityMicros: cursor.a, id: cursor.i } : null;
 }
 
 /** A query split by websearch_to_tsquery's syntax: positive words, and excluded terms/phrases. */

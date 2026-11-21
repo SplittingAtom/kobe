@@ -20,6 +20,7 @@ import { moveFiles, type MoveOutcome } from "../workspace-sync/move.js";
 import { resolveLimits } from "../workspace-sync/quota.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
+import { readJson } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 type Status = 400 | 403 | 404 | 409 | 422 | 429 | 503 | 507;
@@ -120,7 +121,7 @@ export function registerWorkspaceMove(
       onError: (c) => c.json({ code: "invalid_request", message: "That move is too large." }, 413),
     }),
     async (c) => {
-      const body = workspaceMoveRequestSchema.safeParse(await c.req.json().catch(() => undefined));
+      const body = workspaceMoveRequestSchema.safeParse(await readJson(c, undefined));
       if (!body.success) return fail(c, 400, "invalid_path", "That is not a valid workspace path.");
       const { from, to } = body.data;
       const owner = { teamId: c.get("team").id, userId: c.get("user").id };

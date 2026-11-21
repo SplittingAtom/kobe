@@ -11,6 +11,7 @@ import { authenticateSandbox, type McpAuthDeps } from "../mcp/principal.js";
 import type { McpService } from "../mcp/service.js";
 import type { KobeMcpService } from "../kobe-mcp/service.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
+import { invalidRequest, notFound, readJson } from "../http/request.js";
 
 /**
  * The server's internal listener (port 8082): the MCP proxy's policy re-check (KOBE-58). Not on the
@@ -85,7 +86,7 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   const mcp = new Hono();
   mcp.use(async (c, next) => {
     if (FORWARDED_HEADERS.some((h) => c.req.header(h) !== undefined)) {
-      return c.json({ code: "not_found", message: "Not found." }, 404);
+      return notFound(c, "not_found", "Not found.");
     }
     if (!timingSafeEqual(digest(c.req.header("authorization") ?? ""), keyDigest)) {
       return c.json({ code: "unauthorized", message: "Internal key required." }, 401);
@@ -113,18 +114,18 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   // secret.
   mcp.get("/connectors/:id/endpoint", async (c) => {
     const id = connectorId(c.req.param("id"));
-    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    if (!id.success) return notFound(c, "connector_not_available", "Not found.");
     const [row] = await deps.auth.db
       .select({ url: connectors.url })
       .from(connectors)
       .where(and(eq(connectors.id, id.data), isNull(connectors.deletedAt)));
-    if (!row) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    if (!row) return notFound(c, "connector_not_available", "Not found.");
     return c.json({ url: row.url });
   });
 
   mcp.post("/connectors/:id/tools", async (c) => {
     const id = connectorId(c.req.param("id"));
-    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    if (!id.success) return notFound(c, "connector_not_available", "Not found.");
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     const listed = await deps.mcp.listTools(auth.principal, id.data);
@@ -141,12 +142,12 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   // sandbox token only; the proxy puts the key on the upstream request and nowhere else.
   mcp.post("/connectors/:id/grant", async (c) => {
     const id = connectorId(c.req.param("id"));
-    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    if (!id.success) return notFound(c, "connector_not_available", "Not found.");
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     // A skill eval (KOBE-325) never runs on a member's own keys (nor a Registry reviewer's).
     if (auth.principal.evalThreadId !== undefined) {
-      return c.json({ code: "not_connected", message: "No personal keys in skill evals." }, 404);
+      return notFound(c, "not_connected", "No personal keys in skill evals.");
     }
     const revealed = await deps.mcp.revealCredential(auth.principal, id.data);
     if (revealed.ok) {
@@ -165,16 +166,16 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
       );
     }
     if (revealed.failure === "not_connected") {
-      return c.json({ code: "not_connected", message: "No key stored." }, 404);
+      return notFound(c, "not_connected", "No key stored.");
     }
     return c.json({ code: "unavailable", message: "Credential unavailable." }, 503);
   });
 
   mcp.post("/connectors/:id/calls", async (c) => {
     const id = connectorId(c.req.param("id"));
-    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
-    const body = callBodySchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ code: "invalid_request", message: "Invalid call." }, 400);
+    if (!id.success) return notFound(c, "connector_not_available", "Not found.");
+    const body = callBodySchema.safeParse(await readJson(c, null));
+    if (!body.success) return invalidRequest(c, "Invalid call.");
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     const wait = decideLimiter.take(auth.principal.sandboxId);
@@ -198,8 +199,7 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   });
 
   // The built-in Kobe connector (KOBE-619): listed and decided-and-executed by the server itself.
-  const notAvailable = (c: Context) =>
-    c.json({ code: "connector_not_available", message: "Not available." }, 404);
+  const notAvailable = (c: Context) => notFound(c, "connector_not_available", "Not available.");
   mcp.post("/kobe/list", async (c) => {
     if (!deps.kobe) return notAvailable(c);
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
@@ -214,8 +214,8 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   });
   mcp.post("/kobe/calls", async (c) => {
     if (!deps.kobe) return notAvailable(c);
-    const body = callBodySchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ code: "invalid_request", message: "Invalid call." }, 400);
+    const body = callBodySchema.safeParse(await readJson(c, null));
+    if (!body.success) return invalidRequest(c, "Invalid call.");
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     const wait = decideLimiter.take(auth.principal.sandboxId);
@@ -236,10 +236,10 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   // allow carried. 201 `{storage}`; 403 `ticket_invalid`; 409 `run_not_active`.
   mcp.post("/connectors/:id/results", async (c) => {
     const id = connectorId(c.req.param("id"));
-    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
-    if (!deps.appResults) return c.json({ code: "not_available", message: "Not stored." }, 404);
-    const body = resultReportSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ code: "invalid_request", message: "Invalid report." }, 400);
+    if (!id.success) return notFound(c, "connector_not_available", "Not found.");
+    if (!deps.appResults) return notFound(c, "not_available", "Not stored.");
+    const body = resultReportSchema.safeParse(await readJson(c, null));
+    if (!body.success) return invalidRequest(c, "Invalid report.");
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     const stored = await reportCapturedResult(deps.appResults, auth.principal, id.data, body.data);

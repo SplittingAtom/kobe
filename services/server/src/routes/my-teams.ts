@@ -9,8 +9,8 @@ import {
 import type { AuthVariables } from "../auth/session.js";
 import { readActiveTeamId } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { activeTeamSchema } from "../teams/schemas.js";
+import { invalidRequest, parseBody } from "../http/request.js";
 
 /**
  * The team switcher's API (spec D9): the caller's teams with their role, and the session's one

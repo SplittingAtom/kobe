@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { eq, sql, users } from "@kobe/db";
+import { eq, sql, users, pgCodeOf } from "@kobe/db";
 import {
   readUiPreferences,
   scheduleTimezoneSchema,
@@ -13,15 +13,9 @@ import type { ServerDeps } from "../deps.js";
 import { grantsOf } from "../skills/registry/grants.js";
 import { retract } from "../skills/registry/review-decide.js";
 import { mySubmissions } from "../skills/registry/submissions.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 const INVALID = "Send known layout preferences within their bounds.";
-
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: unknown; cause?: { code?: unknown } };
-  const code = e.cause?.code ?? e.code;
-  return typeof code === "string" ? code : undefined;
-}
 
 export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -45,7 +39,7 @@ export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
 
   /** The submitter takes a submission back before a decision (KOBE-334 review M3). */
   app.post("/skill-submissions/:id/retract", async (c) => {
-    const id = z.uuid().safeParse(c.req.param("id"));
+    const id = param(c, "id", z.uuid());
     const notFound = { code: "not_found", message: "No such submission of yours." };
     if (!id.success) return c.json(notFound, 404);
     const r = await retract(db, id.data, c.get("user").id);
@@ -96,7 +90,7 @@ export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
         return c.json({ preferences: readUiPreferences(row?.prefs ?? null) });
       } catch (err) {
         // users_ui_preferences CHECK: the merged document is too large (or not an object).
-        if (pgCode(err) === "23514") return invalidRequest(c, INVALID);
+        if (pgCodeOf(err) === "23514") return invalidRequest(c, INVALID);
         throw err;
       }
     },

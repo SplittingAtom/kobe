@@ -21,7 +21,7 @@ import {
   getPersonalSkillsDisabled,
   setTeamSkillSettings,
 } from "../skills/settings.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const STATUS_FILTERS = {
   pending: ["pending"],
@@ -119,11 +119,11 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     "/:skillId/versions/:version",
     requireTeamPermission("team.skills.review"),
     async (c) => {
-      const skillId = idSchema.safeParse(c.req.param("skillId"));
-      const version = versionSchema.safeParse(c.req.param("version"));
+      const skillId = param(c, "skillId", idSchema);
+      const version = param(c, "version", versionSchema);
       const body = await parseBody(c, decisionSchema);
       if (!skillId.success || !version.success) {
-        return c.json({ code: "not_found", message: "No such skill version." }, 404);
+        return notFound(c, "not_found", "No such skill version.");
       }
       if (!body)
         return invalidRequest(c, "Send decision: approved or rejected, and an optional note.");
@@ -141,8 +141,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
         },
       );
       if (!result.ok) {
-        if (result.error === "not_found")
-          return c.json({ code: "not_found", message: "No such skill version." }, 404);
+        if (result.error === "not_found") return notFound(c, "not_found", "No such skill version.");
         if (result.error === "changed_since_approval")
           return c.json(
             {

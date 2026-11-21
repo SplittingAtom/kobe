@@ -18,6 +18,7 @@ import {
 import { createDb, type KobeDb } from "./client.js";
 import * as schema from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 const app = createDb(inject("appUrl"), { max: 4 });
 const owner = new pg.Pool({ connectionString: inject("ownerUrl"), max: 1 });
@@ -46,16 +47,11 @@ async function count(where = "true", values: unknown[] = []): Promise<number> {
   return rows[0]?.n ?? 0;
 }
 
-const pgCode = (err: unknown): string | undefined => {
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code;
-};
-
 async function codeOf(promise: Promise<unknown>): Promise<string | undefined> {
   try {
     await promise;
   } catch (err) {
-    return pgCode(err);
+    return pgCodeOf(err);
   }
   return undefined;
 }

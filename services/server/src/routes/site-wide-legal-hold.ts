@@ -24,7 +24,7 @@ import {
   type SiteHoldError,
   type SiteHoldResult,
 } from "../legal-hold/site-store.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
@@ -133,7 +133,7 @@ export function siteWideLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   });
 
   app.get("/:id", async (c) => {
-    const id = idParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParamSchema);
     if (!id.success) return fail(c, "hold_not_found");
     const detail = await getSiteHold(db, id.data);
     if (!detail) return fail(c, "hold_not_found");
@@ -144,7 +144,7 @@ export function siteWideLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   const decide =
     (action: (db: typeof deps.database.db, by: string, id: string) => Promise<SiteHoldResult>) =>
     async (c: Ctx) => {
-      const id = idParamSchema.safeParse(c.req.param("id"));
+      const id = param(c, "id", idParamSchema);
       if (!id.success) return fail(c, "hold_not_found");
       return respond(c, await action(db, c.get("user").id, id.data));
     };
@@ -153,7 +153,7 @@ export function siteWideLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   app.post("/:id/withdraw", decide(withdrawSiteHold));
 
   app.post("/:id/release", async (c) => {
-    const id = idParamSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idParamSchema);
     if (!id.success) return fail(c, "hold_not_found");
     const body = await parseBody(c, requestReleaseSchema);
     if (!body) return invalidRequest(c, "Give a reason for the release (10-2000 characters).");

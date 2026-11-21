@@ -8,7 +8,7 @@ import type { Context } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { setTeamDefaultAgent, teamDefaultAgent } from "../agents/team-default.js";
-import { parseBody } from "../teams/http.js";
+import { parseBody } from "../http/request.js";
 
 const MESSAGES: Readonly<Record<TeamDefaultAgentErrorCode, string>> = {
   invalid_request: "Send agentId: an agent's id, or null for the site default.",

@@ -13,6 +13,7 @@ import {
   withTeam,
   type KobeDb,
   type KobeTx,
+  pgCodeOf,
 } from "@kobe/db";
 import type { AgentTransfer, AgentTransferList, AgentTransferView } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
@@ -137,11 +138,6 @@ const ref = (agent: OwnedAgent) => ({
   slug: agent.slug,
 });
 
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.cause?.code ?? e?.code;
-}
-
 /**
  * `POST /v1/agents/:id/transfer`: the owner offers their agent to another active member of the
  * active team. A new offer replaces a pending one in this team (cancelled); one pending in another
@@ -186,7 +182,7 @@ export async function requestTransfer(
     });
   } catch (err) {
     // The one pending offer per agent is in another team.
-    if (pgCode(err) === "23505") return fail("invalid_transition");
+    if (pgCodeOf(err) === "23505") return fail("invalid_transition");
     throw err;
   }
 }

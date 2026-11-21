@@ -29,6 +29,7 @@ import {
   users,
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /** KOBE-40: providers and catalog (site-wide), team enablement and gateway keys (team, RLS). */
 let app: KobeDatabase;
@@ -64,7 +65,6 @@ beforeAll(async () => {
 });
 afterAll(() => app.close());
 
-const pgCode = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code;
 const failure = (p: Promise<unknown>) =>
   p.then(
     () => undefined,
@@ -84,7 +84,7 @@ describe("providers and catalog", () => {
       const err = await failure(
         app.db.insert(modelProviders).values({ name: "x", createdBy: userId, ...row }),
       );
-      expect(pgCode(err), row.id).toBe("23514");
+      expect(pgCodeOf(err), row.id).toBe("23514");
     }
   });
 
@@ -92,7 +92,7 @@ describe("providers and catalog", () => {
     const err = await failure(
       app.db.delete(modelProviders).where(eq(modelProviders.id, providerId)),
     );
-    expect(pgCode(err)).toBe("23503");
+    expect(pgCodeOf(err)).toBe("23503");
   });
 
   it("refuses aliases and model ids outside the grammar", async () => {
@@ -105,7 +105,7 @@ describe("providers and catalog", () => {
       const err = await failure(
         app.db.insert(modelCatalog).values({ alias: a, providerId, model: m, createdBy: userId }),
       );
-      expect(pgCode(err), `${a}/${m}`).toBe("23514");
+      expect(pgCodeOf(err), `${a}/${m}`).toBe("23514");
     }
   });
 
@@ -123,7 +123,7 @@ describe("providers and catalog", () => {
           .set({ inputModalities: bad })
           .where(eq(modelCatalog.alias, alias)),
       );
-      expect(pgCode(err), bad.join()).toBe("23514");
+      expect(pgCodeOf(err), bad.join()).toBe("23514");
     }
     await app.db
       .update(modelCatalog)
@@ -150,7 +150,7 @@ describe("providers and catalog", () => {
       { maxOutputTokens: 8_192, contextWindow: 8_192 },
       { maxOutputTokens: 16_384, contextWindow: 8_192 },
     ]) {
-      expect(pgCode(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
+      expect(pgCodeOf(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
     }
     await set({ maxOutputTokens: 4_096, contextWindow: 8_192 });
     await set({ maxOutputTokens: null, contextWindow: null, reasoning: false });
@@ -247,7 +247,7 @@ describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
           thinkingMax: "high",
         }, // effort-only control: lowest must be low
       ] as Partial<typeof modelCatalog.$inferInsert>[]) {
-        expect(pgCode(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
+        expect(pgCodeOf(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
       }
     } finally {
       await set({ ...NONE, reasoning: false });
@@ -271,7 +271,7 @@ describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
       );
     await teamRow("low");
     await teamRow(null);
-    expect(pgCode(await failure(teamRow("huge")))).toBe("23514");
+    expect(pgCodeOf(await failure(teamRow("huge")))).toBe("23514");
     const seenByB = await withTeam(app.db, teamB, (tx) =>
       tx.select().from(teamModels).where(eq(teamModels.alias, thread)),
     );
@@ -297,13 +297,13 @@ describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
         tx.execute(sql`UPDATE threads SET thinking_level = 'max' WHERE id = ${ids.threadId}`),
       ),
     );
-    expect(pgCode(await badThread)).toBe("23514");
+    expect(pgCodeOf(await badThread)).toBe("23514");
     const badRun = failure(
       withTeam(app.db, teamA, (tx) =>
         tx.execute(sql`UPDATE runs SET thinking_level = 'max' WHERE id = ${ids.runId}`),
       ),
     );
-    expect(pgCode(await badRun)).toBe("23514");
+    expect(pgCodeOf(await badRun)).toBe("23514");
     // The gateway's read of a run's level: only inside the run's team.
     expect(await runThinkingLevelOf(app.db, teamA, ids.runId)).toBe("low");
     expect(await runThinkingLevelOf(app.db, teamB, ids.runId)).toBeUndefined();
@@ -324,7 +324,7 @@ describe("team enablement", () => {
         tx.insert(teamModels).values({ teamId: teamA, alias: "nope", enabledBy: userId }),
       ),
     );
-    expect(pgCode(notInCatalog)).toBe("23503");
+    expect(pgCodeOf(notInCatalog)).toBe("23503");
 
     const second = `b-${teamA.slice(0, 8)}`;
     await app.db
@@ -337,7 +337,7 @@ describe("team enablement", () => {
           .values({ teamId: teamA, alias: second, isDefault: true, enabledBy: userId }),
       ),
     );
-    expect(pgCode(twoDefaults)).toBe("23505");
+    expect(pgCodeOf(twoDefaults)).toBe("23505");
   });
 
   it("removing an alias from the catalog removes every team's enablement of it", async () => {
@@ -380,8 +380,10 @@ describe("gateway sync state", () => {
   });
 
   it("the app role cannot add or delete the state row", async () => {
-    expect(pgCode(await failure(app.db.insert(modelGatewayState).values({ id: 1 })))).toBe("42501");
-    expect(pgCode(await failure(app.db.delete(modelGatewayState)))).toBe("42501");
+    expect(pgCodeOf(await failure(app.db.insert(modelGatewayState).values({ id: 1 })))).toBe(
+      "42501",
+    );
+    expect(pgCodeOf(await failure(app.db.delete(modelGatewayState)))).toBe("42501");
   });
 });
 

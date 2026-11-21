@@ -5,8 +5,8 @@ import type { ServerDeps } from "../deps.js";
 import { notifyTeamInvite } from "../invitations/notify.js";
 import { inviteToTeam, listTeamInvites, revokeTeamInvite } from "../invitations/team-invites.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { idSchema, teamRoleSchema } from "../teams/schemas.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const inviteSchema = z
   .object({
@@ -76,7 +76,7 @@ export function teamInvitesRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   app.delete("/:id", async (c) => {
-    const id = idSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", idSchema);
     // `?expectedRole=` (KOBE-621): revoke only while the invitation still offers this role.
     const expectedRaw = c.req.query("expectedRole");
     const expected = expectedRaw === undefined ? undefined : teamRoleSchema.safeParse(expectedRaw);
@@ -85,7 +85,7 @@ export function teamInvitesRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
     if (revoked === "changed_since_approval") return c.json(CHANGED, 409);
     return revoked
       ? c.body(null, 204)
-      : c.json({ code: "invitation_not_found", message: "No invitation with that id." }, 404);
+      : notFound(c, "invitation_not_found", "No invitation with that id.");
   });
 
   return app;

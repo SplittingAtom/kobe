@@ -13,8 +13,8 @@ import {
 } from "../skills/registry/retire.js";
 import { emailRetirement, notifyRetirement } from "../skills/registry/retire-notify.js";
 import { semverSchema } from "../skills/semver.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { logger } from "../logger.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 const idSchema = z.uuid();
 const actSchema = z.enum(["deprecate", "undeprecate", "withdraw", "revoke", "unrevoke"]);
@@ -72,20 +72,20 @@ export function siteSkillRetireRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
 
   // The published versions to act on (Site console): Site admins and the skill's maintainers.
   app.get("/catalog/:skillId/versions", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
-    if (!id.success) return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    const id = param(c, "skillId", idSchema);
+    if (!id.success) return notFound(c, "not_found", ERRORS.not_found[1]);
     const r = await publishedForActors(db, id.data, actor(c));
-    if (r === "not_found") return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    if (r === "not_found") return notFound(c, "not_found", ERRORS.not_found[1]);
     if (r === "forbidden") return c.json({ code: "forbidden", message: ERRORS.forbidden[1] }, 403);
     return c.json(r);
   });
 
   app.post("/catalog/:skillId/versions/:semver/:act", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
-    const semver = semverSchema.safeParse(c.req.param("semver"));
-    const act = actSchema.safeParse(c.req.param("act"));
+    const id = param(c, "skillId", idSchema);
+    const semver = param(c, "semver", semverSchema);
+    const act = param(c, "act", actSchema);
     if (!id.success || !semver.success || !act.success)
-      return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+      return notFound(c, "not_found", ERRORS.not_found[1]);
     const body = await parseBody(c, noteSchema);
     if (!body) return invalidRequest(c, "Send an optional note (up to 2000 characters).");
     const r = await retireVersion(db, {
@@ -99,8 +99,8 @@ export function siteSkillRetireRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
   });
 
   app.post("/catalog/:skillId/deprecate", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
-    if (!id.success) return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    const id = param(c, "skillId", idSchema);
+    if (!id.success) return notFound(c, "not_found", ERRORS.not_found[1]);
     const body = await parseBody(c, skillSchema);
     if (!body) return invalidRequest(c, "Send an optional replacementId.");
     return answer(
@@ -114,8 +114,8 @@ export function siteSkillRetireRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
   });
 
   app.post("/catalog/:skillId/undeprecate", async (c) => {
-    const id = idSchema.safeParse(c.req.param("skillId"));
-    if (!id.success) return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    const id = param(c, "skillId", idSchema);
+    if (!id.success) return notFound(c, "not_found", ERRORS.not_found[1]);
     return answer(c, await undeprecateSkill(db, { skillId: id.data, actor: actor(c) }));
   });
 

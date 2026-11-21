@@ -15,6 +15,7 @@ import {
   withTeam,
   type KobeDb,
   type KobeTx,
+  pgCodeOf,
 } from "@kobe/db";
 import { AppendError, appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { logger } from "../logger.js";
@@ -80,12 +81,6 @@ const NOT_FOUND = fail("not_found", "No such artifact in this conversation.", "a
 
 class RunEndedError extends Error {}
 class ArtifactMissingError extends Error {}
-
-function pgCode(err: unknown): string | undefined {
-  const e = err as { code?: unknown; cause?: { code?: unknown } };
-  const code = e.cause?.code ?? e.code;
-  return typeof code === "string" ? code : undefined;
-}
 
 /** The run is active, in this thread, and owned by the sandbox's user. */
 async function runActive(tx: KobeTx, target: PutTarget, frame: ArtifactPutFrame): Promise<boolean> {
@@ -345,7 +340,7 @@ export async function putArtifact(
       err instanceof RunEndedError ||
       err instanceof ArtifactMissingError ||
       (err instanceof AppendError && err.code === "run_finished") ||
-      pgCode(err) === "23505";
+      pgCodeOf(err) === "23505";
     if (rolledBack) await discard(blobs, key);
     if (
       err instanceof RunEndedError ||
@@ -354,7 +349,7 @@ export async function putArtifact(
       return RUN_ENDED;
     }
     if (err instanceof ArtifactMissingError) return NOT_FOUND;
-    if (pgCode(err) === "23505") {
+    if (pgCodeOf(err) === "23505") {
       // A concurrent copy of the same tool call won: answer with its result.
       const prior = await withTeam(deps.db, teamId, (tx) =>
         existingResult(tx, teamId, frame.tool_call_id),

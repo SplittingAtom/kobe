@@ -4,7 +4,6 @@ import {
   parseMcpToolName,
   type ActorContext,
   type ApprovalResolutionBody,
-  type JsonObject,
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { signApproval } from "@kobe/protocol/node";
@@ -23,6 +22,7 @@ import { resumeIfNoneWaiting } from "./expiry.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "./run-end.js";
 import { listApprovals, loadApproval, type ApprovalRow } from "./store.js";
 import { viewOf, type ApprovalView } from "./view.js";
+import { parseCanonicalInput } from "./canonical-input.js";
 
 /** A connection not touched for this long has lost its replica (the wire's `staleConnectionMs`). */
 const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
@@ -173,7 +173,7 @@ function approvedCall(row: ApprovalRow, tool: ToolDescriptor | undefined): Appro
   }
   return {
     tool,
-    input: JSON.parse(row.inputCanonical) as JsonObject,
+    input: parseCanonicalInput(row),
     threadId: row.threadId,
     runId: row.runId,
   };
@@ -254,7 +254,7 @@ export async function allowRowInTx(
   now: Date,
   options: { readonly ruleId?: string | undefined; readonly approveAll?: boolean },
 ): Promise<void> {
-  const input = JSON.parse(row.inputCanonical) as unknown;
+  const input = parseCanonicalInput(row);
   // The stored text is canonical by construction; never sign anything else.
   if (canonicalJson(input) !== row.inputCanonical) {
     throw new Error(`approval ${row.id}: stored input is not canonical`);

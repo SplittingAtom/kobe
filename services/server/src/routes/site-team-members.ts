@@ -7,7 +7,7 @@ import {
   type AddMembersError,
 } from "../teams/add-existing.js";
 import { afterMemberRemoved, afterMemberRoleChanged } from "../teams/after-change.js";
-import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
+import { membershipError } from "../teams/http.js";
 import {
   SITE_ADMIN_VIA,
   findTeam,
@@ -18,6 +18,7 @@ import {
 import { mailMembersAdded } from "../teams/notify-added.js";
 import { notifyTeamAdmins } from "../teams/notify-admins.js";
 import { addMembersSchema, idSchema, memberRoleSchema, teamRoleSchema } from "../teams/schemas.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
@@ -56,7 +57,7 @@ export function siteTeamMembersRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
 
   /** The team (404 answered) and, for member routes, the target user id (400 answered). */
   async function target(c: Ctx) {
-    const teamId = idSchema.safeParse(c.req.param("teamId"));
+    const teamId = param(c, "teamId", idSchema);
     if (!teamId.success) return { response: invalidRequest(c) };
     const team = await findTeam(db, teamId.data);
     if (!team) return { response: c.json(teamNotFound, 404) };

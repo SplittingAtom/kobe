@@ -1,12 +1,13 @@
 import { Hono, type Context } from "hono";
-import { notebookRunBodySchema, type ActorContext } from "@kobe/protocol";
+import { notebookRunBodySchema } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { NOTEBOOK_ERROR_STATUS, NotebookRunError } from "../notebooks/user-run.js";
 import { RunError } from "../runs/errors.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
+import { actorOf } from "../authz/actor.js";
+import { invalidRequest, param, parseBody } from "../http/request.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -27,7 +28,7 @@ export function threadNotebookRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.use("/:id/*", refuseEvalThreadWrites(deps, "thread"));
 
   app.post("/:id/notebook/run", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     const body = await parseBody(c, notebookRunBodySchema);
     if (!id.success || !body) {
       return invalidRequest(c, "Name an .ipynb file with a cell_id, or a .py file.");
@@ -39,7 +40,7 @@ export function threadNotebookRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
 
   // KOBE-477: start the kernel, running nothing; 202 `waking` while the sandbox wakes.
   app.post("/:id/notebook/start", async (c) => {
-    const id = uuidSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuidSchema);
     if (!id.success) return invalidRequest(c, "Unknown conversation.");
     return answer(c, async () => {
       const started = await deps.runs.notebookStart(actorOf(c), id.data);
@@ -49,23 +50,13 @@ export function threadNotebookRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
 
   for (const op of ["interrupt", "restart"] as const) {
     app.post(`/:id/notebook/${op}`, async (c) => {
-      const id = uuidSchema.safeParse(c.req.param("id"));
+      const id = param(c, "id", uuidSchema);
       if (!id.success) return invalidRequest(c, "Unknown conversation.");
       return answer(c, async () => c.json(await deps.runs.notebookKernel(actorOf(c), id.data, op)));
     });
   }
 
   return app;
-}
-
-function actorOf(c: Ctx): ActorContext {
-  const team = c.get("team");
-  return {
-    user_id: c.get("user").id,
-    team_id: team.id,
-    site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
-  };
 }
 
 async function answer(c: Ctx, fn: () => Promise<Response>): Promise<Response> {

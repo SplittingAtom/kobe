@@ -10,7 +10,6 @@ import {
   etag,
   exportResponse,
   ifMatchRevision,
-  invalidRequest,
   notFound,
   preconditionFailed,
   readAgentInput,
@@ -46,6 +45,7 @@ import { listGalleryConnectors } from "../connectors/team-store.js";
 import { listCatalog } from "../models/admin-store.js";
 import { logger } from "../logger.js";
 import { DANGEROUS_FORBIDDEN, mayUseDangerousMode } from "../policy/dangerous-mode.js";
+import { invalidRequest, param, readJson } from "../http/request.js";
 
 const GALLERY: AgentLocation = { scope: "gallery" };
 const bodySchema = z.object({ teamId: z.uuid() }).strict();
@@ -99,7 +99,7 @@ export function siteGalleryRoutes(
   app.use(requireSitePermission("site.gallery.manage"));
 
   async function galleryAgent(c: Context): Promise<AgentRecord | null> {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     return id.success ? findAgent(db, GALLERY, id.data) : null;
   }
 
@@ -153,7 +153,7 @@ export function siteGalleryRoutes(
   app.post("/:id/eval", async (c) => {
     const agent = await galleryAgent(c);
     if (!agent) return notFound(c);
-    const body = bodySchema.safeParse(await c.req.json().catch(() => null));
+    const body = bodySchema.safeParse(await readJson(c, null));
     if (!body.success) return invalidRequest(c, "Send { teamId }: the team to run the eval in.");
     const started = await startGalleryEval({
       db,
@@ -191,7 +191,7 @@ function mountEditRoutes(app: Hono<{ Variables: AuthVariables }>, deps: ServerDe
     mayUseDangerousMode(null, c.get("siteRole"));
 
   async function galleryAgent(c: Context): Promise<AgentRecord | null> {
-    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const id = param(c, "id", agentIdSchema);
     return id.success ? findAgent(db, GALLERY, id.data) : null;
   }
 

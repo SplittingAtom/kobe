@@ -7,7 +7,6 @@ import {
   timestampSchema,
   uuidSchema,
   type ActorContext,
-  type JsonObject,
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { eq, users, withTeam } from "@kobe/db";
@@ -25,6 +24,7 @@ import {
 import { batchable } from "./approve-all.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
 import { listApprovals, loadApproval } from "./store.js";
+import { parseCanonicalInput } from "./canonical-input.js";
 
 /**
  * What the approval card may offer for one pending approval (`GET /v1/approvals/{id}/remember`,
@@ -125,10 +125,7 @@ export async function rememberOptions(
             expires_at: expires?.toISOString() ?? null,
           };
         });
-  const pattern =
-    tool === undefined
-      ? undefined
-      : exactArgPattern(tool, JSON.parse(row.inputCanonical) as JsonObject);
+  const pattern = tool === undefined ? undefined : exactArgPattern(tool, parseCanonicalInput(row));
   const canRemember =
     choices.length > 0 && (!limits.exact_only || pattern !== undefined) && blocked === null;
 

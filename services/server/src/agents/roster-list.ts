@@ -13,6 +13,7 @@ import {
   withTeam,
   type KobeDb,
   type KobeTx,
+  makeCursorCodec,
 } from "@kobe/db";
 import type {
   AgentLineage,
@@ -47,6 +48,7 @@ import { SITE, siteWhere, TEAM, type Row } from "./store.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { usageOf, type UsageSubject } from "./inventory.js";
 import { lineageOf } from "./lineage.js";
+import { z } from "zod";
 
 const GONE = { member: false, deactivated: true } as const;
 
@@ -80,20 +82,14 @@ interface Candidate {
 const SITE_ROW = { ...SITE, boundTeamId: siteAgents.boundTeamId };
 
 /** Cursor = base64url JSON of the last row's (name, id). */
+const rosterCursor = makeCursorCodec(z.tuple([z.string(), z.string()]));
+
 export function encodeCursor(name: string, id: string): string {
-  return Buffer.from(JSON.stringify([name, id])).toString("base64url");
+  return rosterCursor.encode([name, id]);
 }
 
 export function decodeCursor(cursor: string): readonly [string, string] | null {
-  try {
-    const value: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (Array.isArray(value) && value.length === 2 && value.every((v) => typeof v === "string")) {
-      return [value[0] as string, value[1] as string];
-    }
-  } catch {
-    // fall through
-  }
-  return null;
+  return rosterCursor.decode(cursor) ?? null;
 }
 
 const compare = (a: readonly [string, string], b: readonly [string, string]) =>

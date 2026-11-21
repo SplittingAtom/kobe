@@ -16,7 +16,7 @@ import {
   listMyEgressRequests,
 } from "../egress/request-store.js";
 import { egressRequestCreateBodySchema as createBodySchema } from "../egress/schemas.js";
-import { invalidRequest, parseBody } from "../teams/http.js";
+import { invalidRequest, notFound, param, parseBody } from "../http/request.js";
 
 /**
  * Request access (`/v1/egress/requests`, spec D28, U12; KOBE-39): a member asks the active team's
@@ -59,7 +59,7 @@ export function egressRequestRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
           409,
         );
       case "thread_not_found":
-        return c.json({ code: "thread_not_found", message: "That thread does not exist." }, 404);
+        return notFound(c, "thread_not_found", "That thread does not exist.");
       case "too_many":
         return c.json(
           {
@@ -96,7 +96,7 @@ export function egressRequestRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
    * team-scope request, within the ceiling, never internal. Everyone else is refused.
    */
   app.post("/:id/decision", async (c) => {
-    const id = z.uuid().safeParse(c.req.param("id"));
+    const id = param(c, "id", z.uuid());
     const body = await parseBody(c, decisionWithPatternBodySchema);
     if (!body) return invalidRequest(c, DECISION_BODY_HINT);
     const siteAdmin = siteRoleAllows(c.get("siteRole"), "site.egress.manage");
@@ -107,7 +107,7 @@ export function egressRequestRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
       );
     }
     if (!id.success) {
-      return c.json({ code: "request_not_found", message: "That request does not exist." }, 404);
+      return notFound(c, "request_not_found", "That request does not exist.");
     }
     return decideAndRespond(c, deps, {
       teamId: c.get("team").id,

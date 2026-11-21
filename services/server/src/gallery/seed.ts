@@ -1,4 +1,14 @@
-import { and, eq, siteAgents, isNull, isNotNull, sql, SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
+import {
+  and,
+  eq,
+  siteAgents,
+  isNull,
+  isNotNull,
+  sql,
+  SYSTEM_ACTOR,
+  type KobeDb,
+  pgCodeOf,
+} from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { SITE, siteWhere } from "../agents/store.js";
 import { archiveAgent, publishAgent } from "../agents/versions.js";
@@ -27,11 +37,6 @@ export interface SeedResult {
     | "kept_customized"
     | "failed";
 }
-
-const pgCode = (err: unknown): string | undefined => {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.cause?.code ?? e?.code;
-};
 
 /**
  * Makes the gallery agent for `key` match the repo's definition (draft only; the version comes
@@ -177,7 +182,7 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
     draft = await ensureDraft(db, parsed);
   } catch (err) {
     // Another replica inserted the same key between our read and write: it is theirs now.
-    if (pgCode(err) !== "23505") throw err;
+    if (pgCodeOf(err) !== "23505") throw err;
     draft = await ensureDraft(db, parsed);
   }
   const { agentId, action } = draft;

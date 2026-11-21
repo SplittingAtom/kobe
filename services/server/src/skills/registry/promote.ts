@@ -15,6 +15,7 @@ import {
   type KobeDb,
   type KobeTx,
   type TeamRole,
+  isUniqueViolation,
 } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { teamRoleAllows } from "../../authz/permissions.js";
@@ -207,14 +208,8 @@ async function submit(
 
 /** A submission that lost a race on the catalog's unique keys, as a refusal (review C3-L3). */
 function uniqueRefusal(err: unknown): Refusal | null {
-  const e = err as {
-    code?: unknown;
-    constraint?: unknown;
-    cause?: { code?: unknown; constraint?: unknown };
-  };
-  if ((e.cause?.code ?? e.code) !== "23505") return null;
-  const constraint = String(e.cause?.constraint ?? e.constraint ?? "");
-  if (constraint === "registry_versions_semver_unique")
+  if (!isUniqueViolation(err)) return null;
+  if (isUniqueViolation(err, "registry_versions_semver_unique"))
     return { code: "already_submitted", message: "This version was just submitted." };
   return {
     code: "taken",
@@ -405,8 +400,7 @@ async function request(
     });
     return { ok: true, kind: "requested", requestId: id };
   } catch (err) {
-    const e = err as { code?: unknown; cause?: { code?: unknown } };
-    if ((e.cause?.code ?? e.code) !== "23505") throw err;
+    if (!isUniqueViolation(err)) throw err;
     return {
       ok: false,
       code: "already_requested",

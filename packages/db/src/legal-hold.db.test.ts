@@ -11,6 +11,7 @@ import {
   lockLegalHolds,
 } from "./legal-hold/index.js";
 import { withTeam } from "./with-team.js";
+import { pgCodeOf } from "./pg-errors.js";
 
 /**
  * KOBE-17 legal hold in the data layer: the guard trigger (two-person rule for placing and
@@ -121,8 +122,7 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
   try {
     await promise;
   } catch (err) {
-    const e = err as { code?: string; cause?: { code?: string } };
-    return e.cause?.code ?? e.code;
+    return pgCodeOf(err);
   }
   return undefined;
 }

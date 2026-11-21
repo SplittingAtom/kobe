@@ -15,6 +15,8 @@ import {
   readEvalRun,
   type EvalViewer,
 } from "../skills/evals/views.js";
+import { SSE_HEADERS } from "../http/sse.js";
+import { param, readJson } from "../http/request.js";
 
 // Skill evals (KOBE-325; contract `@kobe/protocol` skill-evals `api.ts`), in the caller's active
 // team: start one for a draft's current revision or a saved version, read it, its history, cancel
@@ -31,12 +33,6 @@ type Ctx = Context<{ Variables: TeamVariables }>;
 
 const uuid = z.uuid();
 const seq = z.coerce.number().int().min(1).max(1_000_000);
-
-const SSE_HEADERS = {
-  "content-type": "text/event-stream; charset=utf-8",
-  "cache-control": "no-cache",
-  "x-accel-buffering": "no",
-} as const;
 
 const viewerOf = (c: Ctx): EvalViewer => ({
   teamId: c.get("team").id,
@@ -58,7 +54,7 @@ export function skillEvalRoutes(
   const start = async (c: Ctx, subject: StartSubject) => {
     if (!deps.blobs)
       return error(c, 503, "storage_unavailable", "Object storage is not configured.");
-    const body = startSkillEvalBodySchema.safeParse(await c.req.json().catch(() => undefined));
+    const body = startSkillEvalBodySchema.safeParse(await readJson(c, undefined));
     if (!body.success) return error(c, 400, "invalid_request", "Give mode: full or with_only.");
     const started = await startSkillEval(
       { db, blobs: deps.blobs },
@@ -93,30 +89,30 @@ export function skillEvalRoutes(
   };
 
   app.get("/skills/drafts/:id/evals/estimate", team, async (c) => {
-    const id = uuid.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuid);
     if (!id.success) return error(c, 404, "skill_not_found", "No such draft.");
     return estimate(c, { kind: "draft", draftId: id.data });
   });
 
   app.get("/skills/:scope/:id/versions/:seq/evals/estimate", team, async (c) => {
     const scope = c.req.param("scope");
-    const id = uuid.safeParse(c.req.param("id"));
-    const n = seq.safeParse(c.req.param("seq"));
+    const id = param(c, "id", uuid);
+    const n = param(c, "seq", seq);
     if ((scope !== "team" && scope !== "personal") || !id.success || !n.success)
       return error(c, 404, "skill_not_found", "No such skill version.");
     return estimate(c, { kind: "version", scope, skillId: id.data, seq: n.data });
   });
 
   app.post("/skills/drafts/:id/evals", team, async (c) => {
-    const id = uuid.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuid);
     if (!id.success) return error(c, 404, "skill_not_found", "No such draft.");
     return start(c, { kind: "draft", draftId: id.data });
   });
 
   app.post("/skills/:scope/:id/versions/:seq/evals", team, async (c) => {
     const scope = c.req.param("scope");
-    const id = uuid.safeParse(c.req.param("id"));
-    const n = seq.safeParse(c.req.param("seq"));
+    const id = param(c, "id", uuid);
+    const n = param(c, "seq", seq);
     if ((scope !== "team" && scope !== "personal") || !id.success || !n.success)
       return error(c, 404, "skill_not_found", "No such skill version.");
     return start(c, { kind: "version", scope, skillId: id.data, seq: n.data });
@@ -139,14 +135,14 @@ export function skillEvalRoutes(
   });
 
   app.get("/skill-evals/:id", team, async (c) => {
-    const id = uuid.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuid);
     if (!id.success) return error(c, 404, "not_found", "No such eval.");
     const run = await withTeam(db, c.get("team").id, (tx) => readEvalRun(tx, viewerOf(c), id.data));
     return run ? c.json(run) : error(c, 404, "not_found", "No such eval.");
   });
 
   app.post("/skill-evals/:id/cancel", team, async (c) => {
-    const id = uuid.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuid);
     if (!id.success) return error(c, 404, "not_found", "No such eval.");
     const who = viewerOf(c);
     const outcome = await withTeam(db, who.teamId, async (tx) => {
@@ -171,7 +167,7 @@ export function skillEvalRoutes(
   });
 
   app.get("/skill-evals/:id/events", team, async (c) => {
-    const id = uuid.safeParse(c.req.param("id"));
+    const id = param(c, "id", uuid);
     if (!id.success) return error(c, 404, "not_found", "No such eval.");
     const who = viewerOf(c);
     const stream = await skillEvalEventStream({ db, hub: options.hub }, who, id.data, {

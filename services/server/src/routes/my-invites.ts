@@ -7,8 +7,8 @@ import {
   declineTeamInvite,
   verifiedEmailOf,
 } from "../invitations/team-invites.js";
-import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
+import { invalidRequest, param } from "../http/request.js";
 
 const notFound = {
   code: "invitation_not_found",
@@ -41,7 +41,7 @@ export function myInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   });
 
   app.post("/:teamId/accept", async (c) => {
-    const teamId = idSchema.safeParse(c.req.param("teamId"));
+    const teamId = param(c, "teamId", idSchema);
     if (!teamId.success) return invalidRequest(c);
     const { id } = c.get("user");
     const email = await verifiedEmailOf(db, id);
@@ -51,7 +51,7 @@ export function myInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   });
 
   app.post("/:teamId/decline", async (c) => {
-    const teamId = idSchema.safeParse(c.req.param("teamId"));
+    const teamId = param(c, "teamId", idSchema);
     if (!teamId.success) return invalidRequest(c);
     const email = await verifiedEmailOf(db, c.get("user").id);
     return email !== null && (await declineTeamInvite(db, teamId.data, email))
