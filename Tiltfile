@@ -42,20 +42,22 @@ MANIFESTS = [
 ]
 COMMON = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".pnpmfile.cjs", "turbo.json", "tsconfig.base.json", "packages"] + MANIFESTS
 
-def kobe_image(name, dockerfile, sources):
+def kobe_image(name, dockerfile, sources, build_args={}):
     docker_build(
         "%s/kobe-%s" % (REGISTRY, name),
         context=".",
         dockerfile=dockerfile,
+        build_args=build_args,
         only=COMMON + sources,
         ignore=["**/node_modules", "**/dist", "**/.next", "**/*.test.ts"],
     )
 
 kobe_image("web", "apps/web/Dockerfile", ["apps/web"])
-kobe_image("server", "services/server/Dockerfile", ["services/server"])
-kobe_image("mcp-proxy", "services/mcp-proxy/Dockerfile", ["services/mcp-proxy"])
-kobe_image("egress-proxy", "services/egress-proxy/Dockerfile", ["services/egress-proxy"])
-kobe_image("model-gateway", "services/model-gateway/Dockerfile", ["services/model-gateway"])
+# The Node services share services/Dockerfile (KOBE-723).
+kobe_image("server", "services/Dockerfile", ["services/server"], {"SERVICE": "server"})
+kobe_image("mcp-proxy", "services/Dockerfile", ["services/mcp-proxy"], {"SERVICE": "mcp-proxy"})
+kobe_image("egress-proxy", "services/Dockerfile", ["services/egress-proxy"], {"SERVICE": "egress-proxy"})
+kobe_image("model-gateway", "services/Dockerfile", ["services/model-gateway"], {"SERVICE": "model-gateway"})
 
 if local:
     # Throwaway Postgres with public dev credentials: k3d only.

@@ -7,10 +7,7 @@ updates:
       [
         "/images/sandbox",
         "/images/bifrost",
-        "/services/server",
-        "/services/mcp-proxy",
-        "/services/egress-proxy",
-        "/services/model-gateway",
+        "/services",
         "/apps/web",
         "/images/orbit-eval",
         "/images/skill-scan",
@@ -26,7 +23,8 @@ updates:
         patterns: ["python"]
         group-by: dependency-name
   - package-ecosystem: github-actions
-    directory: /
+    # The workflows, and the composite actions they share (KOBE-721).
+    directories: ["/", "/.github/actions/*"]
     schedule: { interval: weekly }
   - package-ecosystem: npm
     directory: /

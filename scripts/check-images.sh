@@ -7,10 +7,10 @@ cd "$(dirname "$0")/.."
 
 # service:dockerfile pairs (portable to macOS bash 3.2, which lacks associative arrays)
 IMAGES="web:apps/web/Dockerfile
-server:services/server/Dockerfile
-mcp-proxy:services/mcp-proxy/Dockerfile
-egress-proxy:services/egress-proxy/Dockerfile
-model-gateway:services/model-gateway/Dockerfile"
+server:services/Dockerfile
+mcp-proxy:services/Dockerfile
+egress-proxy:services/Dockerfile
+model-gateway:services/Dockerfile"
 TAG="${IMAGE_TAG:-dev}"
 # e.g. IMAGE_PREFIX=ghcr.io/splittingatom/kobe- IMAGE_TAG=0.1.0 to build release-named images.
 PREFIX="${IMAGE_PREFIX:-kobe-}"
@@ -22,8 +22,11 @@ for entry in ${IMAGES}; do
   svc="${entry%%:*}"
   dockerfile="${entry#*:}"
   image="${PREFIX}${svc}:${TAG}"
+  # The Node services share services/Dockerfile and name themselves with SERVICE (KOBE-723).
+  build_args=()
+  [ "${dockerfile}" != services/Dockerfile ] || build_args=(--build-arg "SERVICE=${svc}")
   echo "==> building ${image}"
-  if ! docker build --progress=plain -f "${dockerfile}" -t "${image}" . >"${build_log}" 2>&1; then
+  if ! docker build --progress=plain -f "${dockerfile}" ${build_args[@]+"${build_args[@]}"} -t "${image}" . >"${build_log}" 2>&1; then
     tail -n 80 "${build_log}"
     echo "FAIL ${image}: docker build failed; daemon state follows"
     scripts/ci-docker-diagnostics.sh

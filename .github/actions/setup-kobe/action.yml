@@ -1,0 +1,60 @@
+# The workspace toolchain for a job, defined once (KOBE-721): pnpm (version from `packageManager`),
+# Node from .nvmrc with the pnpm store cache, the install, and optionally Turbo's local cache.
+# Run after actions/checkout. Pins stay full commit SHAs (Dependabot's github-actions entry
+# also updates this file).
+name: Set up the Kobe workspace
+description: pnpm, Node from .nvmrc, pnpm install and the Turbo cache from main
+inputs:
+  pnpm:
+    description: "'false' sets up Node only (no pnpm, no store cache, no install)"
+    default: "true"
+  node-cache:
+    description: setup-node's package-manager cache ('pnpm', or '' for none)
+    default: pnpm
+  install-args:
+    description: arguments to `pnpm install` ('' skips the install)
+    default: --frozen-lockfile
+  turbo-cache:
+    description: >-
+      'restore' restores Turbo's local cache (.turbo/cache) saved by ci.yml's `static` job on main,
+      so unchanged packages replay their build output instead of rebuilding; 'none' skips it
+    default: none
+outputs:
+  turbo-key:
+    description: the cache key a job on main saves Turbo's cache under (actions/cache/save)
+    value: ${{ steps.turbo-key.outputs.key }}
+runs:
+  using: composite
+  steps:
+    - if: inputs.pnpm == 'true'
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+        cache: ${{ inputs.pnpm == 'true' && inputs.node-cache || '' }}
+    - if: inputs.pnpm == 'true' && inputs.install-args != ''
+      shell: bash
+      env:
+        INSTALL_ARGS: ${{ inputs.install-args }}
+      # Word splitting is intended: INSTALL_ARGS holds several arguments.
+      run: pnpm install ${INSTALL_ARGS}
+    # Lockfile + UTC day: main saves at most one entry a day per lockfile (the first push of the
+    # day; later saves find the key taken and only warn), so the entries stay few and don't crowd
+    # out publish.yml's image layer cache. A run restores the newest entry for its lockfile, then
+    # any older one; Turbo's own task hashes decide what is reused, so a stale entry only costs
+    # misses.
+    - id: turbo-key
+      shell: bash
+      env:
+        LOCK: ${{ hashFiles('pnpm-lock.yaml') }}
+      run: |
+        echo "prefix=turbo-${RUNNER_OS}-${LOCK}-" >> "$GITHUB_OUTPUT"
+        echo "key=turbo-${RUNNER_OS}-${LOCK}-$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+    - if: inputs.turbo-cache == 'restore'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .turbo/cache
+        key: ${{ steps.turbo-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.turbo-key.outputs.prefix }}
+          turbo-${{ runner.os }}-

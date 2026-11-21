@@ -35,16 +35,28 @@ jobs:
           # Node service images and web on HIGH too; the sandbox (large Debian/Python surface)
           # stays CRITICAL-only, with HIGH in the report.
           - { name: web, dockerfile: apps/web/Dockerfile, gate: "HIGH,CRITICAL" }
-          - { name: server, dockerfile: services/server/Dockerfile, gate: "HIGH,CRITICAL" }
-          - { name: mcp-proxy, dockerfile: services/mcp-proxy/Dockerfile, gate: "HIGH,CRITICAL" }
+          - {
+              name: server,
+              dockerfile: services/Dockerfile,
+              build-args: SERVICE=server,
+              gate: "HIGH,CRITICAL",
+            }
+          - {
+              name: mcp-proxy,
+              dockerfile: services/Dockerfile,
+              build-args: SERVICE=mcp-proxy,
+              gate: "HIGH,CRITICAL",
+            }
           - {
               name: egress-proxy,
-              dockerfile: services/egress-proxy/Dockerfile,
+              dockerfile: services/Dockerfile,
+              build-args: SERVICE=egress-proxy,
               gate: "HIGH,CRITICAL",
             }
           - {
               name: model-gateway,
-              dockerfile: services/model-gateway/Dockerfile,
+              dockerfile: services/Dockerfile,
+              build-args: SERVICE=model-gateway,
               gate: "HIGH,CRITICAL",
             }
           - { name: sandbox, dockerfile: images/sandbox/Dockerfile, gate: CRITICAL }
@@ -70,6 +82,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
           platforms: linux/amd64
           load: true
           push: false
@@ -100,6 +113,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
           platforms: linux/amd64
           push: true
           provenance: true

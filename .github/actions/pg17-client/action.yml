@@ -1,0 +1,17 @@
+# PostgreSQL 17 client tools from PGDG, defined once (KOBE-721). kobe backup/restore runs the real
+# pg_dump, pg_restore and psql; the runner's own client is older than the server (pg_dump refuses
+# newer servers).
+name: PostgreSQL 17 client
+description: Installs postgresql-client-17 from PGDG and puts its bin directory on PATH
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        # Self-hosted runners (ci/runners) start from a minimal image without postgresql-common.
+        if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
+          sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends postgresql-common
+        fi
+        sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+        sudo apt-get install -y --no-install-recommends postgresql-client-17
+        echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"

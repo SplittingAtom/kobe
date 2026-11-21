@@ -118,6 +118,14 @@ DROP INDEX CONCURRENTLY IF EXISTS "thread_app_results_thread_idx";
 | `publish`        | push to `main`                      | images (Trivy-scanned before push, fails on fixable CRITICAL, and HIGH for the Node services and web; `sha-<short>`; `main` moved last) and the chart to ghcr |
 | `security-audit` | weekly, manual                      | `pnpm audit --prod` and the images' pinned Python/npm packages against OSV (`scripts/osv-audit.mjs`); fails on HIGH or CRITICAL                               |
 
+`ci` runs `static` (hygiene, format, build, typecheck, lint, license check) and `unit` (unit and
+chart tests, sandbox privilege separation) side by side; the required `checks` job passes when
+both did, as `db` does for `db-core` and the `db-server` shards. Jobs set up the toolchain with
+the composite actions in `.github/actions/` (`setup-kobe`: pnpm, Node from `.nvmrc`, install and
+Turbo's cache; `pg17-client`). `static` saves Turbo's local cache (`.turbo/cache`, build output
+only) on every push to `main`, and every `ci` job restores it, so packages unchanged since `main`
+replay their build instead of rebuilding; pull requests and merge-queue runs only read it.
+
 Image vulnerability gate: `sandbox-image`, `orbit-eval-image`, `skill-scan-image` and every image
 in `publish` run Trivy (`aquasecurity/trivy-action`, pinned by digest) twice: a report of HIGH and
 CRITICAL findings that have a fix, then a gate that fails the job on any fixable CRITICAL; for the

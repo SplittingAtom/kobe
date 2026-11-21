@@ -11,6 +11,7 @@ on:
       - scripts/assert-image-licenses.sh
       - .dockerignore
       - .github/workflows/skill-scan-image.yml
+      - .github/actions/setup-kobe/**
   schedule:
     - cron: "47 6 * * *"
   workflow_dispatch:
@@ -45,14 +46,9 @@ jobs:
         run: docker build -f images/skill-scan/Dockerfile -t kobe-skill-scan:ci . || { scripts/ci-docker-diagnostics.sh; exit 1; }
       - name: Acceptance checks (hardened run without network, a planted package, a bad path)
         run: images/skill-scan/test-image.sh kobe-skill-scan:ci
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
+      - uses: ./.github/actions/setup-kobe
       - name: License audit of bundled Python packages
         run: |
-          pnpm install --frozen-lockfile
           pnpm --filter @kobe/license-check build
           images/sandbox/collect-licenses.sh kobe-skill-scan:ci > "$RUNNER_TEMP/skill-scan-licenses.json"
           LICENSE_REPORT="$RUNNER_TEMP/skill-scan-licenses.json" \

@@ -63,8 +63,9 @@ this repository is public, so infrastructure details never go into tracked files
   `kobe-sandbox-agent` + data stack from `images/sandbox/requirements.txt`); checks in
   `images/sandbox/test-image.sh <image>`; built, tested and Trivy-scanned by
   `.github/workflows/sandbox-image.yml` (fails on fixable CRITICAL).
-- **Images:** one multi-stage Dockerfile per service, built from the repo root (`docker build -f
-services/<svc>/Dockerfile .`), runtime `USER 1000:1000` (numeric, for `runAsNonRoot`). Node services
+- **Images:** one multi-stage Dockerfile per image, built from the repo root; the four Node services
+  share `services/Dockerfile` (`docker build -f services/Dockerfile --build-arg SERVICE=<svc> .`),
+  web uses `apps/web/Dockerfile`. Runtime `USER 1000:1000` (numeric, for `runAsNonRoot`). Node services
   ship via `pnpm deploy --prod --legacy`; web ships Next.js `standalone` output.
 
 ### Non-negotiables (enforced in review)

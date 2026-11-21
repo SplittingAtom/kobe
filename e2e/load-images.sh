@@ -19,9 +19,12 @@ tag="${2:?usage: e2e/load-images.sh <cluster> <tag>}"
 registry="ghcr.io/splittingatom"
 
 build() {
-  local dockerfile="$1" image="$2"
+  local dockerfile="$1" image="$2" name="$3"
+  # The Node services share services/Dockerfile and name themselves with SERVICE (KOBE-723).
+  local build_args=()
+  [ "${dockerfile}" != services/Dockerfile ] || build_args=(--build-arg "SERVICE=${name}")
   echo "==> building ${image}"
-  if ! docker build --progress=plain -f "${dockerfile}" -t "${image}" .; then
+  if ! docker build --progress=plain -f "${dockerfile}" ${build_args[@]+"${build_args[@]}"} -t "${image}" .; then
     echo "error: docker build failed for ${image}; daemon state follows" >&2
     scripts/ci-docker-diagnostics.sh
     return 1
@@ -31,12 +34,12 @@ build() {
 archives="${KOBE_IMAGE_ARCHIVES:-}"
 images=()
 sources=()
-for pair in web:apps/web/Dockerfile server:services/server/Dockerfile \
-  mcp-proxy:services/mcp-proxy/Dockerfile egress-proxy:services/egress-proxy/Dockerfile \
-  model-gateway:services/model-gateway/Dockerfile \
+for pair in web:apps/web/Dockerfile server:services/Dockerfile \
+  mcp-proxy:services/Dockerfile egress-proxy:services/Dockerfile \
+  model-gateway:services/Dockerfile \
   sandbox:images/sandbox/Dockerfile ${KOBE_E2E_EXTRA_IMAGES:+$(for x in ${KOBE_E2E_EXTRA_IMAGES}; do printf '%s:images/%s/Dockerfile ' "$x" "$x"; done)}; do
   image="${registry}/kobe-${pair%%:*}:${tag}"
-  [ -n "${archives}" ] || build "${pair#*:}" "${image}"
+  [ -n "${archives}" ] || build "${pair#*:}" "${image}" "${pair%%:*}"
   images+=("${image}")
 done
 if [ -n "${archives}" ]; then

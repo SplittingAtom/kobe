@@ -1,4 +1,7 @@
-# Build from the repository root: docker build -f services/egress-proxy/Dockerfile .
+# One image definition for the Node services server, mcp-proxy, egress-proxy and model-gateway
+# (KOBE-723): the base image, its hardening and the runtime user are edited here once. Build from
+# the repository root and name the service (its directory under services/):
+#   docker build -f services/Dockerfile --build-arg SERVICE=server .
 # No `# syntax=` directive: dockerd's built-in frontend parses this file, so builds don't start
 # the external docker/dockerfile frontend container (it crashed intermittently on CI runners:
 # "frontend grpc server closed unexpectedly").
@@ -13,9 +16,15 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs ./
 RUN pnpm fetch
 COPY . .
-RUN pnpm install --offline --frozen-lockfile \
- && pnpm turbo run build --filter=@kobe/egress-proxy... \
- && pnpm --filter=@kobe/egress-proxy deploy --prod --legacy /out
+# Declared after the shared layers above, so the four services reuse them from the build cache.
+ARG SERVICE
+RUN case "${SERVICE}" in \
+      server|mcp-proxy|egress-proxy|model-gateway) ;; \
+      *) echo "error: --build-arg SERVICE must be server, mcp-proxy, egress-proxy or model-gateway (got '${SERVICE}')" >&2; exit 1 ;; \
+    esac \
+ && pnpm install --offline --frozen-lockfile \
+ && pnpm turbo run build --filter=@kobe/${SERVICE}... \
+ && pnpm --filter=@kobe/${SERVICE} deploy --prod --legacy /out
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production

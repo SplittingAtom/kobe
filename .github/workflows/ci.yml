@@ -21,35 +21,72 @@ defaults:
   run:
     shell: bash
 
+# Turbo's local cache at the path setup-kobe restores and the static job saves (KOBE-721); stated
+# explicitly because Turbo picks another default inside git worktrees.
+env:
+  TURBO_CACHE_DIR: .turbo/cache
+
 jobs:
-  checks:
+  # KOBE-721: the old serial `checks` job (14-15 min) is split into `static` and `unit`, which run
+  # side by side; the thin `checks` job below keeps the required check name. Every job restores
+  # Turbo's local cache from main (setup-kobe), so packages unchanged since main replay their
+  # build output instead of rebuilding.
+  static:
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
-    # 14-15 min on hosted runners since 2026-10 (the queue run of #400 hit 15 min inside
-    # license:check with every step green); 25 only bounds a hang, a healthy run stays ~15.
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - id: setup
+        uses: ./.github/actions/setup-kobe
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
+          # On main this job builds from scratch and saves the cache every other job restores: an
+          # entry then holds one commit's build output instead of growing run after run.
+          turbo-cache: ${{ github.ref == 'refs/heads/main' && 'none' || 'restore' }}
+      # The chart's lint script runs `helm lint`.
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.22.0
-      - run: pnpm install --frozen-lockfile
       - name: No infrastructure details in tracked files (public repo)
         run: scripts/check-public-hygiene.sh
       - name: Nothing people read calls the scope "install" (KOBE-257)
         run: scripts/check-site-wording.mjs
-      # The pinned Pi (sandbox image lockfile) for kobe-sandbox-agent's real-Pi integration test.
-      - run: npm ci --prefix images/sandbox/pi --omit=dev --ignore-scripts --no-audit --no-fund
       - run: pnpm format:check
       - run: pnpm build
+      # Saved right after the build, so the entry holds build output only (typecheck and lint
+      # results are not cached across runs). Only main writes, at most once a day per lockfile
+      # (setup-kobe's key): pull requests and merge-queue runs read main's entries and spend no
+      # cache quota (publish.yml's image layers share it).
+      - name: Save Turbo's build cache (main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs.turbo-key }}
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm license:check
+
+  unit:
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-kobe
+        with:
+          turbo-cache: restore
+      # The chart's tests render templates with helm.
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
+      # The pinned Pi (sandbox image lockfile) for kobe-sandbox-agent's real-Pi integration test.
+      - run: npm ci --prefix images/sandbox/pi --omit=dev --ignore-scripts --no-audit --no-fund
+      # Every package's own build too, as before the split: some tests and the scripts below run
+      # a package's dist/ (mostly replayed from the restored cache).
+      - run: pnpm build
       # Node sees the node's CPUs, not the runner's limit (6 CPUs, ci/runners); cap parallel
       # suites and each suite's vitest workers (2 × 3) so per-test timeouts and worker start-up
       # don't trip on self-hosted runners. Every package's test script is `vitest run`.
@@ -62,7 +99,23 @@ jobs:
       # secret scan says INVALID (never ok) when its controls fail; a fake kubectl, no cluster.
       - name: Gate 2 harness failure paths
         run: e2e/gate2/sandbox.test.sh
-      - run: pnpm license:check
+
+  # The required check (the main ruleset names `checks`): passes only when static and unit passed.
+  checks:
+    needs: [static, unit]
+    # always(): a skipped required check counts as passed, so this job must run (and fail)
+    # even when one of them was cancelled or skipped.
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: static and unit passed
+        env:
+          STATIC: ${{ needs.static.result }}
+          UNIT: ${{ needs.unit.result }}
+        run: |
+          echo "static: ${STATIC}, unit: ${UNIT}"
+          [ "${STATIC}" = success ] && [ "${UNIT}" = success ]
 
   # Migrations from scratch + RLS catalog check + cross-team probe suite, on every push (spec D5).
   # KOBE-300: the server's test:db (~13 min serial) runs in the db-server shards beside this job;
@@ -80,23 +133,11 @@ jobs:
       # Docker Hub pulls from shared runner IPs fail, 2026-10-09) sometimes answers 429 (KOBE-415).
       - name: PostgreSQL 17 (pulled with retries)
         run: scripts/ci-postgres.sh ci-only
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-kobe
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # kobe backup/restore tests run the real pg_dump, pg_restore and psql; the runner's own
-      # client is older than the server (pg_dump refuses newer servers), so add 17 from PGDG.
-      - name: PostgreSQL 17 client
-        run: |
-          # Self-hosted runners (ci/runners) start from a minimal image without postgresql-common.
-          if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
-            sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends postgresql-common
-          fi
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get install -y --no-install-recommends postgresql-client-17
-          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+          turbo-cache: restore
+      # kobe backup/restore tests run the real pg_dump, pg_restore and psql (PGDG's 17 client).
+      - uses: ./.github/actions/pg17-client
       - name: Migrations match the Drizzle schema
         run: pnpm --filter @kobe/db exec drizzle-kit check && pnpm db:check
       - name: RLS catalog check and cross-team probe suite (every package but the server)
@@ -139,12 +180,9 @@ jobs:
       # Postgres without it, so migrations and the probe suite are proven on such a server too.
       - name: PostgreSQL 17 + pgvector (pulled with retries)
         run: scripts/ci-postgres.sh ci-only --pgvector
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-kobe
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          turbo-cache: restore
       - name: Server test:db, shard ${{ matrix.shard }} of 2
         env:
           SHARD: ${{ matrix.shard }}

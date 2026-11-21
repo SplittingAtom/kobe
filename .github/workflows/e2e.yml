@@ -101,10 +101,18 @@ jobs:
       matrix:
         include:
           - { name: web, dockerfile: apps/web/Dockerfile }
-          - { name: server, dockerfile: services/server/Dockerfile }
-          - { name: mcp-proxy, dockerfile: services/mcp-proxy/Dockerfile }
-          - { name: egress-proxy, dockerfile: services/egress-proxy/Dockerfile }
-          - { name: model-gateway, dockerfile: services/model-gateway/Dockerfile }
+          - { name: server, dockerfile: services/Dockerfile, build-args: SERVICE=server }
+          - { name: mcp-proxy, dockerfile: services/Dockerfile, build-args: SERVICE=mcp-proxy }
+          - {
+              name: egress-proxy,
+              dockerfile: services/Dockerfile,
+              build-args: SERVICE=egress-proxy,
+            }
+          - {
+              name: model-gateway,
+              dockerfile: services/Dockerfile,
+              build-args: SERVICE=model-gateway,
+            }
           - { name: sandbox, dockerfile: images/sandbox/Dockerfile }
           # KOBE-232: the pre-publish Orbit eval Job's image, for the gate4 shard only (its archive is
           # named e2e-extra-*, so the other shards don't download or import it).
@@ -141,6 +149,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
           platforms: linux/amd64
           provenance: false
           sbom: false
@@ -227,24 +236,20 @@ jobs:
       # in Playwright's Chromium, pinned by e2e/browser/package-lock.json.
       # KOBE-233: the restore shard runs the operator CLI (packages/cli) on the runner, as an operator
       # would, with PostgreSQL 17 client tools (docs/backup-restore.md, Requirements).
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: matrix.shard == 'restore'
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-kobe
         if: matrix.shard == 'gate3' || matrix.shard == 'restore' || startsWith(matrix.shard, 'gate5') || startsWith(matrix.shard, 'gate7') || matrix.shard == 'gate-apps'
         with:
-          node-version-file: .nvmrc
-          cache: ${{ matrix.shard == 'restore' && 'pnpm' || '' }}
-      - name: The kobe CLI and PostgreSQL 17 client tools
+          # pnpm only for the restore shard; it installs the CLI's packages alone below.
+          pnpm: ${{ matrix.shard == 'restore' }}
+          install-args: ""
+      - name: The kobe CLI
         if: matrix.shard == 'restore'
         run: |
           pnpm install --frozen-lockfile --filter '@kobe/cli...'
           pnpm --filter '@kobe/cli...' run build
-          if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
-            sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends postgresql-common
-          fi
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get install -y --no-install-recommends postgresql-client-17
-          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      - name: PostgreSQL 17 client tools
+        if: matrix.shard == 'restore'
+        uses: ./.github/actions/pg17-client
       # Chromium from the cache when this Playwright version was fetched before: its download host
       # (playwright.download.prss.microsoft.com) once failed DNS on a runner (KOBE-415).
       - name: Playwright's browsers from the cache
