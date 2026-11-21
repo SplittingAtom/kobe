@@ -45,7 +45,7 @@
     "hono": "^4.13.16",
     "isomorphic-git": "1.44.2",
     "nodemailer": "^10.5.0",
-    "openid-client": "6.8.8",
+    "openid-client": "6.9.0",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "ws": "^8.22.0",
