@@ -1,0 +1,1657 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tool frame gate: artifact.put > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: artifact.put > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The artifact differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "artifact.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "artifact",
+      "reason": "input_mismatch",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: artifact.put > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "artifact.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "artifact",
+      "reason": "not_allowed",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: artifact.put > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the artifact was not stored.",
+      },
+      "ok": false,
+      "type": "artifact.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "artifact",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: artifact.put > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the artifact was not stored.",
+      },
+      "ok": false,
+      "type": "artifact.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "artifact",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: artifact.put > refuses past the in-flight cap without reaching the action 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Too many artifacts are being stored. Try again.",
+      },
+      "ok": false,
+      "type": "artifact.result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: artifact.put > refuses without the artifacts capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce artifact support.",
+      },
+      "ok": false,
+      "type": "artifact.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "artifact",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: each kind's own stages (KOBE-706 review) > refuses file.edit_propose from a skill eval's sandbox before the run check 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "Skill evals never propose edits to the member's files.",
+      },
+      "ok": false,
+      "type": "file.edit_propose_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: each kind's own stages (KOBE-706 review) > refuses file.open from a skill eval's sandbox before the run check 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "Skill evals never open the member's files.",
+      },
+      "ok": false,
+      "type": "file.open_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: each kind's own stages (KOBE-706 review) > refuses notebook.run when the replica has no notebook storage 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce notebooks.",
+      },
+      "ok": false,
+      "type": "notebook.run_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: each kind's own stages (KOBE-706 review) > refuses skill.draft_save when skill drafts are not configured, after the allowance 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Skill drafts are not available here.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.edit_propose > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.edit_propose > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The edit differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "file.edit_propose_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.edit_propose > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "file.edit_propose_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.edit_propose > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the edit was not proposed.",
+      },
+      "ok": false,
+      "type": "file.edit_propose_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.edit_propose > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the edit was not proposed.",
+      },
+      "ok": false,
+      "type": "file.edit_propose_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.edit_propose > refuses without the file_edits capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce file edits.",
+      },
+      "ok": false,
+      "type": "file.edit_propose_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.open > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.open > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The file differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "file.open_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.open > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "file.open_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.open > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the file was not opened.",
+      },
+      "ok": false,
+      "type": "file.open_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.open > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the file was not opened.",
+      },
+      "ok": false,
+      "type": "file.open_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.open > refuses without the file_edits capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce file edits.",
+      },
+      "ok": false,
+      "type": "file.open_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The file differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "file.share_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "file.share",
+      "reason": "input_mismatch",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "file.share_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "file.share",
+      "reason": "not_allowed",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the file was not shared.",
+      },
+      "ok": false,
+      "type": "file.share_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "file.share",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the file was not shared.",
+      },
+      "ok": false,
+      "type": "file.share_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "file.share",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > refuses past the in-flight cap without reaching the action 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Too many files are being shared. Try again.",
+      },
+      "ok": false,
+      "type": "file.share_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: file.share > refuses without the files capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce file sharing.",
+      },
+      "ok": false,
+      "type": "file.share_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "file.share",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The memory differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "input_mismatch",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "not_allowed",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so nothing was remembered.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so nothing was remembered.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > refuses past the in-flight cap without reaching the action 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Too many memory writes are waiting. Try again.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.put > refuses without the memory capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce memory.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The recall differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "input_mismatch",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "not_allowed",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > refuses past the in-flight cap without reaching the action 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Too many memory requests are waiting. Try again.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.read > refuses without the memory capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce memory.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The call differs from the one that was allowed.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "input_mismatch",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "not_allowed",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses past the in-flight cap without reaching the action 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Too many memory requests are waiting. Try again.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses without the memory capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce semantic memory.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: memory.show > refuses without the semantic_memory capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce semantic memory.",
+      },
+      "ok": false,
+      "type": "memory.result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "memory",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: notebook.run > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: notebook.run > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The code differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "notebook.run_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: notebook.run > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "notebook.run_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: notebook.run > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the code was not run.",
+      },
+      "ok": false,
+      "type": "notebook.run_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: notebook.run > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the code was not run.",
+      },
+      "ok": false,
+      "type": "notebook.run_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: notebook.run > refuses without the notebooks capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce notebooks.",
+      },
+      "ok": false,
+      "type": "notebook.run_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: project.commit > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: project.commit > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The commit differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "project.commit_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: project.commit > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "project.commit_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: project.commit > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so nothing was committed.",
+      },
+      "ok": false,
+      "type": "project.commit_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: project.commit > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so nothing was committed.",
+      },
+      "ok": false,
+      "type": "project.commit_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: project.commit > refuses without the projects capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce projects.",
+      },
+      "ok": false,
+      "type": "project.commit_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > closes the connection for a run never leased here 1`] = `
+{
+  "answers": [],
+  "audits": [
+    {
+      "kind": "violation",
+      "reason": "unknown_run",
+    },
+  ],
+  "closed": 4007,
+  "errors": [
+    "unknown_run",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > refuses a call the policy check did not allow (input_mismatch) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The folder differs from the call that was allowed.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "skill.draft",
+      "reason": "input_mismatch",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > refuses a call the policy check did not allow (not_allowed) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This tool call was not allowed for this tool.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "skill.draft",
+      "reason": "not_allowed",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > refuses for a compaction run (KOBE-213) 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the skill was not saved.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "skill.draft",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > refuses for a run that has ended 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "The run has ended, so the skill was not saved.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "skill.draft",
+      "reason": "run_not_active",
+    },
+  ],
+  "closed": undefined,
+  "errors": [
+    "run_not_active",
+  ],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > refuses past the in-flight cap without reaching the action 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "storage_failed",
+        "message": "Too many skills are being saved. Try again.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;
+
+exports[`tool frame gate: skill.draft_save > refuses without the skill_drafts capability 1`] = `
+{
+  "answers": [
+    {
+      "error": {
+        "code": "not_allowed",
+        "message": "This sandbox did not announce skill drafts.",
+      },
+      "ok": false,
+      "type": "skill.draft_save_result",
+      "v": 1,
+    },
+  ],
+  "audits": [
+    {
+      "kind": "skill.draft",
+      "reason": "capability_missing",
+    },
+  ],
+  "closed": undefined,
+  "errors": [],
+  "executed": false,
+  "reached": [],
+}
+`;

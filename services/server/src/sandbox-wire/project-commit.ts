@@ -1,5 +1,6 @@
 import {
   APPROVAL_TTL_MS,
+  CAPABILITY_PROJECTS,
   type PolicyDecision,
   type ProjectCommitFrame,
   type ProjectCommitOutcome,
@@ -7,7 +8,6 @@ import {
 } from "@kobe/protocol";
 import { sql, withTeam } from "@kobe/db";
 import type { Logger } from "pino";
-import type { AllowedVerdict } from "../artifacts/allowed.js";
 import { approvalHolds, noPromptCode, recordDeniedWrite } from "../approvals/server-write.js";
 import type { ApprovalVerifier } from "../approvals/verify.js";
 import { loadAccess } from "../projects/access.js";
@@ -17,6 +17,7 @@ import {
   type CommitDeps,
   type CommitResult,
 } from "../projects/commits.js";
+import type { ToolFrameSpec } from "./gated-frame.js";
 import type { ApprovalBroker, SandboxTarget } from "./types.js";
 
 /**
@@ -49,16 +50,11 @@ export interface ProjectCommitConnection {
   readonly deps: ProjectCommitDeps;
   readonly target: SandboxTarget;
   readonly connectionId: string;
-  readonly hasCapability: boolean;
-  /** `#checkToolRun` for this frame; "violation" was already answered and the frame dropped. */
-  readonly runCheck: () => "ok" | "ended" | "violation";
-  /** The policy check's allowance for this call (same tool and input hash). */
-  readonly verdict: () => AllowedVerdict;
   /**
-   * True only when the policy check allowed the call by a rule (a positive mark on the allowance);
-   * anything else, including an evicted entry, asks for an approval (fail closed).
+   * True only when the policy check allowed this frame's call by a rule (a positive mark on the
+   * allowance); anything else, including an evicted entry, asks for an approval (fail closed).
    */
-  readonly ruleAllowed: () => boolean;
+  readonly ruleAllowed: (frame: ProjectCommitFrame) => boolean;
   /** Projects with a commit waiting for approval on this connection. */
   readonly pending: Set<string>;
   /** Aborts when the connection closes (a pending approval resolves as denied). */
@@ -183,12 +179,10 @@ async function gate(c: ProjectCommitConnection, frame: ProjectCommitFrame): Prom
   });
 }
 
-export function onProjectCommit(
-  c: ProjectCommitConnection,
-  frame: ProjectCommitFrame,
-): Promise<void> {
+/** Exactly one `project.commit_result` for the frame, whatever answers it first. */
+function answerOnce(c: ProjectCommitConnection, frame: ProjectCommitFrame): (reply: Reply) => void {
   let answered = false;
-  const answer = (reply: Reply): void => {
+  return (reply) => {
     if (answered) return;
     answered = true;
     c.send(
@@ -210,40 +204,59 @@ export function onProjectCommit(
           },
     );
   };
-  if (!c.hasCapability) {
-    answer(failed("not_allowed", "This sandbox did not announce projects."));
-    return Promise.resolve();
-  }
-  const check = c.runCheck();
-  if (check === "violation") return Promise.resolve();
-  if (check === "ended") {
-    answer(failed("not_allowed", "The run has ended, so nothing was committed."));
-    return Promise.resolve();
-  }
-  const verdict = c.verdict();
-  if (verdict !== "ok") {
-    c.deps.log.warn({ run_id: frame.run_id, verdict, security: true }, "project.commit refused");
-    answer(
-      failed(
-        "not_allowed",
-        verdict === "input_mismatch"
-          ? "The commit differs from the call that was allowed."
-          : "This tool call was not allowed for this tool.",
-      ),
-    );
-    return Promise.resolve();
-  }
-  let held: string | undefined;
-  return run(c, frame, answer, (projectId) => {
-    held = projectId;
-  })
-    .catch((err: unknown) => {
-      c.deps.log.error({ err, run_id: frame.run_id }, "project.commit failed");
-      answer(failed("storage_failed", "The commit could not be stored. Try again."));
-    })
-    .finally(() => {
-      if (held !== undefined) c.pending.delete(held);
-    });
+}
+
+/** The gate's spec for `project.commit` (the allowance is checked; one commit per project runs). */
+export function projectCommitSpec(
+  c: ProjectCommitConnection,
+): ToolFrameSpec<ProjectCommitFrame, "check"> {
+  return {
+    capabilities: [CAPABILITY_PROJECTS],
+    allowance: "check",
+    refuse(frame, refusal) {
+      const answer = answerOnce(c, frame);
+      switch (refusal.stage) {
+        case "capability":
+          answer(failed("not_allowed", "This sandbox did not announce projects."));
+          return;
+        case "ended":
+          answer(failed("not_allowed", "The run has ended, so nothing was committed."));
+          return;
+        case "verdict": {
+          const { verdict } = refusal;
+          c.deps.log.warn(
+            { run_id: frame.run_id, verdict, security: true },
+            "project.commit refused",
+          );
+          answer(
+            failed(
+              "not_allowed",
+              verdict === "input_mismatch"
+                ? "The commit differs from the call that was allowed."
+                : "This tool call was not allowed for this tool.",
+            ),
+          );
+          return;
+        }
+        case "busy":
+          return; // no in-flight cap for this kind
+      }
+    },
+    act(frame) {
+      const answer = answerOnce(c, frame);
+      let held: string | undefined;
+      void run(c, frame, answer, (projectId) => {
+        held = projectId;
+      })
+        .catch((err: unknown) => {
+          c.deps.log.error({ err, run_id: frame.run_id }, "project.commit failed");
+          answer(failed("storage_failed", "The commit could not be stored. Try again."));
+        })
+        .finally(() => {
+          if (held !== undefined) c.pending.delete(held);
+        });
+    },
+  };
 }
 
 async function run(
@@ -305,7 +318,7 @@ async function run(
       },
       expect: { baseSeq: preview.baseSeq, diffHash: preview.diffHash },
     });
-  if (c.ruleAllowed()) {
+  if (c.ruleAllowed(frame)) {
     // A policy rule allowed commit_project outright (remembered or team rule): no approval.
     answer(replyOf(await commit()));
     return;

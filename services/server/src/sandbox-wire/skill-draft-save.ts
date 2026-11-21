@@ -1,8 +1,12 @@
-import type { ServerToSandboxFrame, SkillDraftSaveFrame } from "@kobe/protocol";
+import {
+  CAPABILITY_SKILL_DRAFTS,
+  type ServerToSandboxFrame,
+  type SkillDraftSaveFrame,
+} from "@kobe/protocol";
 import type { Logger } from "pino";
-import type { AllowedVerdict } from "../artifacts/allowed.js";
 import type { SkillDraftRefusal, SkillDraftToolResult } from "../skills/drafts/tool.js";
 import type { WireContext } from "./context.js";
+import type { InFlight, ToolFrameSpec } from "./gated-frame.js";
 import type { SandboxTarget } from "./types.js";
 
 /**
@@ -16,18 +20,16 @@ export interface SkillDraftSaveConnection {
   readonly target: SandboxTarget;
   readonly sandboxId: string;
   readonly log: Pick<Logger, "error">;
-  readonly hasCapability: boolean;
-  /** `#checkToolRun` for this frame; "violation" was already answered and the frame dropped. */
-  readonly runCheck: () => "ok" | "ended" | "violation";
-  /** Takes the allowance (single use): a second frame for the call is "replayed". */
-  readonly verdict: () => AllowedVerdict | "replayed";
-  /** Saves in flight on this connection, and the cap. */
-  readonly inFlight: { count: number };
+  /** Saves in flight on this connection (capped at `maxPendingArtifactPuts` by the gate). */
+  readonly inFlight: InFlight;
   send(frame: ServerToSandboxFrame): boolean;
 }
 
-export function onSkillDraftSave(c: SkillDraftSaveConnection, frame: SkillDraftSaveFrame): void {
-  const fail = (code: string, message: string) =>
+/** The gate's spec for `skill.draft_save`: single use (review M1), one allowed call is one save. */
+export function skillDraftSaveSpec(
+  c: SkillDraftSaveConnection,
+): ToolFrameSpec<SkillDraftSaveFrame, "consume"> {
+  const fail = (frame: SkillDraftSaveFrame, code: string, message: string) =>
     c.send({
       v: 1,
       type: "skill.draft_save_result",
@@ -35,77 +37,84 @@ export function onSkillDraftSave(c: SkillDraftSaveConnection, frame: SkillDraftS
       ok: false,
       error: { code, message },
     });
-  const audit = (reason: SkillDraftRefusal) =>
+  const audit = (frame: SkillDraftSaveFrame, reason: SkillDraftRefusal) =>
     c.ctx.auditSkillDraftRefused(c.target, c.sandboxId, {
       reason,
       runId: frame.run_id,
       toolCallId: frame.tool_call_id,
     });
-  const refuse = (reason: SkillDraftRefusal, message: string) => {
-    audit(reason);
-    fail("not_allowed", message);
+  const refuse = (frame: SkillDraftSaveFrame, reason: SkillDraftRefusal, message: string) => {
+    audit(frame, reason);
+    fail(frame, "not_allowed", message);
   };
-  if (!c.hasCapability) {
-    refuse("capability_missing", "This sandbox did not announce skill drafts.");
-    return;
-  }
-  const check = c.runCheck();
-  if (check === "violation") return;
-  if (check === "ended") {
-    refuse("run_not_active", "The run has ended, so the skill was not saved.");
-    return;
-  }
-  const verdict = c.verdict();
-  if (verdict !== "ok") {
-    refuse(
-      verdict,
-      verdict === "input_mismatch"
-        ? "The folder differs from the call that was allowed."
-        : verdict === "replayed"
-          ? "This tool call was already used to save a skill."
-          : "This tool call was not allowed for this tool.",
-    );
-    return;
-  }
-  const tool = c.ctx.skillDrafts;
-  if (!tool) {
-    fail("storage_failed", "Skill drafts are not available here.");
-    return;
-  }
-  if (c.inFlight.count >= c.ctx.tuning.maxPendingArtifactPuts) {
-    fail("storage_failed", "Too many skills are being saved. Try again.");
-    return;
-  }
-  c.inFlight.count += 1;
-  void tool
-    .save(c.target, frame)
-    .catch((err: unknown): SkillDraftToolResult => {
-      c.log.error({ err }, "skill.draft_save failed");
-      return {
-        ok: false,
-        code: "storage_failed",
-        message: "The skill could not be saved. Try again.",
-      };
-    })
-    .then((result) => {
-      c.inFlight.count -= 1;
-      if (result.ok) {
-        c.send({
-          v: 1,
-          type: "skill.draft_save_result",
-          request_id: frame.request_id,
-          ok: true,
-          op: "skill_draft_save",
-          draft_id: result.draftId,
-          name: result.name,
-          created: result.created,
-          rev: result.rev,
-          file_count: result.fileCount,
-          ...(result.newBecause ? { new_because: result.newBecause } : {}),
-        });
-        return;
+  return {
+    capabilities: [CAPABILITY_SKILL_DRAFTS],
+    allowance: "consume",
+    inFlight: c.inFlight,
+    refuse(frame, refusal) {
+      switch (refusal.stage) {
+        case "capability":
+          refuse(frame, "capability_missing", "This sandbox did not announce skill drafts.");
+          return;
+        case "ended":
+          refuse(frame, "run_not_active", "The run has ended, so the skill was not saved.");
+          return;
+        case "verdict": {
+          const { verdict } = refusal;
+          refuse(
+            frame,
+            verdict,
+            verdict === "input_mismatch"
+              ? "The folder differs from the call that was allowed."
+              : verdict === "replayed"
+                ? "This tool call was already used to save a skill."
+                : "This tool call was not allowed for this tool.",
+          );
+          return;
+        }
+        case "busy":
+          fail(frame, "storage_failed", "Too many skills are being saved. Try again.");
+          return;
       }
-      if (result.refusal) audit(result.refusal);
-      fail(result.code, result.message);
-    });
+    },
+    afterAllowance(frame) {
+      if (c.ctx.skillDrafts) return false;
+      fail(frame, "storage_failed", "Skill drafts are not available here.");
+      return true;
+    },
+    act(frame) {
+      const tool = c.ctx.skillDrafts;
+      if (!tool) return; // checked after the allowance
+      return tool
+        .save(c.target, frame)
+        .catch((err: unknown): SkillDraftToolResult => {
+          c.log.error({ err }, "skill.draft_save failed");
+          return {
+            ok: false,
+            code: "storage_failed",
+            message: "The skill could not be saved. Try again.",
+          };
+        })
+        .then((result) => {
+          if (result.ok) {
+            c.send({
+              v: 1,
+              type: "skill.draft_save_result",
+              request_id: frame.request_id,
+              ok: true,
+              op: "skill_draft_save",
+              draft_id: result.draftId,
+              name: result.name,
+              created: result.created,
+              rev: result.rev,
+              file_count: result.fileCount,
+              ...(result.newBecause ? { new_because: result.newBecause } : {}),
+            });
+            return;
+          }
+          if (result.refusal) audit(frame, result.refusal);
+          fail(frame, result.code, result.message);
+        });
+    },
+  };
 }

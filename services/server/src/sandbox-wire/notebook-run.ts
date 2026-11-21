@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { KobeDb } from "@kobe/db";
 import {
+  CAPABILITY_NOTEBOOKS,
   NOTEBOOK_CODE_MAX_BYTES,
   NOTEBOOK_TIMEOUT_DEFAULT_S,
   workspaceToolPath,
@@ -9,7 +10,6 @@ import {
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import type { Logger } from "pino";
-import type { AllowedVerdict } from "../artifacts/allowed.js";
 import {
   finishExecution,
   recordStarted,
@@ -20,6 +20,7 @@ import {
 import type { NotebookFiles } from "../notebooks/files.js";
 import { toolText } from "../notebooks/summary.js";
 import { NOTEBOOK_COMMAND_MARGIN_MS } from "./constants.js";
+import type { ToolFrameSpec } from "./gated-frame.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
 
 /**
@@ -35,9 +36,6 @@ export interface NotebookRunConnection {
   readonly target: SandboxTarget;
   readonly files: NotebookFiles | undefined;
   readonly log: Pick<Logger, "error" | "warn">;
-  readonly hasCapability: boolean;
-  readonly runCheck: () => "ok" | "ended" | "violation";
-  readonly verdict: () => AllowedVerdict | "replayed";
   /** Sends the `notebook.execute` on this connection and resolves with its answer. */
   readonly execute: (frame: NotebookExecuteFrame, timeoutMs: number) => Promise<CommandOutcome>;
   send(frame: ServerToSandboxFrame): boolean;
@@ -49,8 +47,11 @@ type Answer =
 
 const refused = (code: string, message: string): Answer => ({ ok: false, code, message });
 
-export function onNotebookRun(c: NotebookRunConnection, frame: NotebookRunFrame): void {
-  const answer = (out: Answer) =>
+/** The gate's spec for `notebook.run`: needs notebook storage too; the allowance is taken once. */
+export function notebookRunSpec(
+  c: NotebookRunConnection,
+): ToolFrameSpec<NotebookRunFrame, "consume"> {
+  const answerer = (frame: NotebookRunFrame) => (out: Answer) =>
     c.send(
       out.ok
         ? out
@@ -62,37 +63,49 @@ export function onNotebookRun(c: NotebookRunConnection, frame: NotebookRunFrame)
             error: { code: out.code, message: out.message },
           },
     );
-  if (!c.hasCapability || c.files === undefined) {
-    answer(refused("not_allowed", "This sandbox did not announce notebooks."));
-    return;
-  }
-  const check = c.runCheck();
-  if (check === "violation") return;
-  if (check === "ended") {
-    answer(refused("not_allowed", "The run has ended, so the code was not run."));
-    return;
-  }
-  const verdict = c.verdict();
-  if (verdict !== "ok") {
-    c.log.warn({ run_id: frame.run_id, verdict, security: true }, "notebook.run refused");
-    answer(
-      refused(
-        "not_allowed",
-        verdict === "input_mismatch"
-          ? "The code differs from the call that was allowed."
-          : verdict === "replayed"
-            ? "This tool call was already used to run code."
-            : "This tool call was not allowed for this tool.",
-      ),
-    );
-    return;
-  }
-  void runForAgent(c, c.files, frame)
-    .catch((err: unknown): Answer => {
-      c.log.error({ err, run_id: frame.run_id }, "notebook.run failed");
-      return refused("storage_failed", "The code could not be run. Try again.");
-    })
-    .then(answer);
+  return {
+    capabilities: [CAPABILITY_NOTEBOOKS],
+    alsoRequires: () => c.files !== undefined,
+    allowance: "consume",
+    refuse(frame, refusal) {
+      const answer = answerer(frame);
+      switch (refusal.stage) {
+        case "capability":
+          answer(refused("not_allowed", "This sandbox did not announce notebooks."));
+          return;
+        case "ended":
+          answer(refused("not_allowed", "The run has ended, so the code was not run."));
+          return;
+        case "verdict": {
+          const { verdict } = refusal;
+          c.log.warn({ run_id: frame.run_id, verdict, security: true }, "notebook.run refused");
+          answer(
+            refused(
+              "not_allowed",
+              verdict === "input_mismatch"
+                ? "The code differs from the call that was allowed."
+                : verdict === "replayed"
+                  ? "This tool call was already used to run code."
+                  : "This tool call was not allowed for this tool.",
+            ),
+          );
+          return;
+        }
+        case "busy":
+          return; // no in-flight cap for this kind
+      }
+    },
+    act(frame) {
+      const files = c.files;
+      if (files === undefined) return; // checked with the capability (alsoRequires)
+      void runForAgent(c, files, frame)
+        .catch((err: unknown): Answer => {
+          c.log.error({ err, run_id: frame.run_id }, "notebook.run failed");
+          return refused("storage_failed", "The code could not be run. Try again.");
+        })
+        .then(answerer(frame));
+    },
+  };
 }
 
 async function runForAgent(

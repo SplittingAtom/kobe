@@ -1,67 +1,30 @@
 import { randomUUID } from "node:crypto";
-import {
-  CAPABILITY_TRACE_SPANS,
-  parseTraceparent,
-  runTraceId,
-  type WireTraceContext,
-  CAPABILITY_APP_CARDS,
-  CAPABILITY_MCP,
-  CAPABILITY_MEMORY,
-  CAPABILITY_SEMANTIC_MEMORY,
-  CAPABILITY_SEMANTIC_MEMORY_PLACEMENT,
-  CAPABILITY_FILE_EDITS,
-  CAPABILITY_PROJECTS,
-  CAPABILITY_RUN_TOKEN,
-  CAPABILITY_SKILL_BUNDLES,
-  CAPABILITY_SKILL_EVAL,
-  CAPABILITY_NOTEBOOKS,
-  CAPABILITY_NOTEBOOK_START,
-  CAPABILITY_THREAD_BRANCH_SUMMARY,
-  CAPABILITY_THREAD_COMPACT,
-  CAPABILITY_THREAD_CONTEXT,
-  CAPABILITY_SYNC_CONFLICTS,
-  serverToSandboxFrameSchema,
-  threadBranchSummaryFrameSchema,
-  threadCompactFrameSchema,
-  type PiGetEntriesData,
-  type RunSemanticMemory,
-  type RunSemanticMemoryItem,
-  type RunStartFrame,
-  type ServerToSandboxFrame,
-  type ThreadBranchSummaryFrame,
-  type ThreadCompactFrame,
-} from "@kobe/protocol";
-import { sql, withTeam, type KobeTx, type SandboxCommandKind } from "@kobe/db";
-import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
-import { keepRunPromptInTx, type PromptSource } from "../runs/run-prompt.js";
-import { failureInfo } from "../runs/failure-codes.js";
+import type { PiGetEntriesData, ServerToSandboxFrame, RunStartFrame } from "@kobe/protocol";
+import { withTeam, type SandboxCommandKind } from "@kobe/db";
 import type { Logger } from "pino";
-import { completeCommand, markDelivered, pendingCommands, type CommandRow } from "./commands.js";
+import { recordRunMemory } from "../memory/items/run-records.js";
+import { markTold } from "../sync-conflicts/store.js";
+import { completeCommand, pendingCommands, type CommandRow } from "./commands.js";
 import type { WireContext } from "./context.js";
+import { claimDelivery, type Claimed } from "./delivery/claim.js";
+import { frameFor, traceContext, wireFrame, type DeliverableFrame } from "./delivery/frames.js";
+import type { MemoryRecord } from "./delivery/memory-plan.js";
+import { deliveryRefusal, failure } from "./delivery/preflight.js";
+import { prepareRunStart } from "./delivery/run-start.js";
+import {
+  endRun,
+  recordResult,
+  tamperedMidRun,
+  tampered,
+  type SettleEnv,
+} from "./delivery/settle.js";
 import {
   lastMirroredEntryId,
-  leafMovedEvents,
   mirrorEntriesInTx,
   parseGetEntries,
   restoreParts,
   threadHasConversation,
 } from "./entries.js";
-import { endRunInTx, loadRun, runStillOpen } from "./run-state.js";
-import { mirrorBranchSummaryInTx, parseBranchSummaryResult } from "./branch-summary-end.js";
-import { buildRunMemory } from "../memory/agent.js";
-import { buildPolicyOnly, buildRunSemantic } from "../memory/items/run-memory.js";
-import { startVectorLeg } from "../memory/items/vector-leg.js";
-import { recordRunMemory } from "../memory/items/run-records.js";
-import { readRunMemoryPlan, type RunMemoryPlan } from "../agents/run-memory.js";
-import { markTold, untoldNotes, type AgentNotes } from "../sync-conflicts/store.js";
-import { mintRunToken } from "./run-token.js";
-import { slotOf } from "./slots.js";
-import {
-  RUNTIME_TAMPERED,
-  auditRuntimeTamperInTx,
-  withTamperAudit,
-  type RuntimeTamperReport,
-} from "./runtime-tamper.js";
 import {
   COMMAND_FAILURES,
   isSummaryCommand,
@@ -70,16 +33,7 @@ import {
   type SandboxTarget,
 } from "./types.js";
 
-/**
- * Whether a stored command still lists image built-ins (`config.builtin_skills`, a run.start queued
- * before KOBE-317). Read from the stored JSON: the frame schema no longer knows the field and
- * parsing strips it (review-317 S1).
- */
-function legacyBuiltins(row: CommandRow): boolean {
-  const config = (row.frame as { config?: unknown }).config;
-  const listed = (config as { builtin_skills?: unknown } | null | undefined)?.builtin_skills;
-  return Array.isArray(listed) && listed.length > 0;
-}
+export { withoutAppCards } from "./delivery/run-start.js";
 
 /** What delivery needs from its connection. */
 export interface DeliveryHost {
@@ -135,23 +89,8 @@ export type IssuedCommand =
       readonly notebook?: NotebookExec;
     };
 
-const NOTEBOOK_COMMANDS: ReadonlySet<SandboxCommandKind> = new Set([
-  "notebook.execute",
-  "notebook.interrupt",
-  "notebook.restart",
-]);
-
 const ANSWERED_MAX = 4_096;
 const DRAIN_BATCH = 20;
-
-/** The sandbox stopped Pi for a tampered runtime: a security event (KOBE-271). */
-const tampered = (outcome: CommandOutcome): boolean =>
-  !outcome.ok && outcome.error.code === RUNTIME_TAMPERED;
-
-const failure = (code: string, message: string): CommandOutcome => ({
-  ok: false,
-  error: { code, message },
-});
 
 /**
  * Server → sandbox commands on one connection: delivers the sandbox's pending command rows in order
@@ -170,10 +109,9 @@ export class CommandDelivery {
   /** Sync conflicts a `run.start` carried, marked told when it is accepted (KOBE-492). */
   readonly #conflictNotes = new WeakMap<IssuedCommand, readonly string[]>();
   /** Semantic memory a `run.start` carried, recorded once the sandbox accepts it (KOBE-382). */
-  readonly #memoryRecords = new WeakMap<
-    IssuedCommand,
-    { readonly runId: string; readonly items: readonly RunSemanticMemoryItem[] }
-  >();
+  readonly #memoryRecords = new WeakMap<IssuedCommand, MemoryRecord>();
+  /** What the `delivery/` helpers get (settlement also fetches entries). */
+  readonly #env: SettleEnv;
   #draining = false;
   #again = false;
   #closed = false;
@@ -181,6 +119,7 @@ export class CommandDelivery {
   constructor(ctx: WireContext, host: DeliveryHost) {
     this.#ctx = ctx;
     this.#host = host;
+    this.#env = { ctx, host, fetchNewEntries: (threadId) => this.fetchNewEntries(threadId) };
   }
 
   /** Pending commands may exist: deliver them (coalesces concurrent pokes). */
@@ -245,7 +184,7 @@ export class CommandDelivery {
       issued.resolve(outcome);
       return;
     }
-    void this.#record(issued, outcome).catch((err: unknown) =>
+    void recordResult(this.#env, issued, outcome).catch((err: unknown) =>
       this.#host.log.error({ err, kind: issued.commandKind }, "could not record a command result"),
     );
   }
@@ -364,7 +303,7 @@ export class CommandDelivery {
         },
         "entry sync failed",
       );
-      if (tampered(outcome)) await this.#tamperedMidRun(threadId, outcome);
+      if (tampered(outcome)) await tamperedMidRun(this.#env, threadId, outcome);
       return undefined;
     }
     const data = parseGetEntries(outcome.data);
@@ -450,176 +389,48 @@ export class CommandDelivery {
     if (row.requesterReplica === this.#ctx.replicaId) this.#ctx.localResult(row.id);
   }
 
-  /** The wire frame for a stored command, with a fresh command id; undefined if invalid. */
-  #frameFor(
-    row: CommandRow,
-    commandId: string,
-  ):
-    | ServerToSandboxFrame
-    | Omit<ThreadCompactFrame, "run_token">
-    | Omit<ThreadBranchSummaryFrame, "run_token">
-    | undefined {
-    const base = { ...row.frame, v: 1, type: row.kind, command_id: commandId };
-    const candidate =
-      row.kind === "pi.command"
-        ? { ...base, command: { ...(row.frame.command as object), id: commandId } }
-        : base;
-    // A compaction's (or branch summary's) run token is minted at delivery (KOBE-213, KOBE-548):
-    // the stored frame has none yet.
-    const parsed =
-      row.kind === "thread.compact"
-        ? threadCompactFrameSchema.omit({ run_token: true }).safeParse(candidate)
-        : row.kind === "thread.branch_summary"
-          ? threadBranchSummaryFrameSchema.omit({ run_token: true }).safeParse(candidate)
-          : serverToSandboxFrameSchema.safeParse(candidate);
-    if (!parsed.success) return undefined;
-    // The stored frame must be about the row's thread and run (defence in depth).
-    const f = parsed.data as { thread_id?: string; run_id?: string };
-    if (isSummaryCommand(row.kind) && row.runId === null) return undefined;
-    if (f.thread_id !== row.threadId) return undefined;
-    if (row.runId !== null && f.run_id !== row.runId) return undefined;
-    return parsed.data;
-  }
-
   async #deliver(row: CommandRow): Promise<void> {
-    const ctx = this.#ctx;
-    const { teamId, userId } = this.#host.target;
     const commandId = randomUUID();
-    const frame = this.#frameFor(row, commandId);
+    const frame = frameFor(row, commandId);
     if (!frame) {
       await this.#fail(row, failure("invalid_command", "the stored command is not a valid frame"));
       return;
     }
-    // Skill eval commands (KOBE-325) only to a skill eval's own sandbox whose agent knows them.
-    if (
-      (row.kind === "eval.prepare" || row.kind === "eval.snapshot" || row.kind === "eval.read") &&
-      (this.#host.target.evalThreadId !== row.threadId ||
-        !this.#host.hasCapability(CAPABILITY_SKILL_EVAL))
-    ) {
-      await this.#fail(
-        row,
-        failure("skill_eval_unsupported", "this sandbox can't take skill eval commands"),
-      );
+    if (!(await this.#deliverable(row, frame))) return;
+    const starts = startsRun(row.kind);
+    const claimed = await claimDelivery(this.#env, row, starts);
+    if (claimed === "gone") return; // expired or taken meanwhile
+    if (claimed === "replaced") {
+      this.#host.replaced();
       return;
     }
-    // The thread kernel's commands (KOBE-464) only to an agent that runs kernels, never to an eval
-    // sandbox.
-    if (
-      NOTEBOOK_COMMANDS.has(row.kind) &&
-      (this.#host.target.evalThreadId !== undefined ||
-        !this.#host.hasCapability(CAPABILITY_NOTEBOOKS))
-    ) {
-      await this.#fail(row, failure("notebooks_unsupported", "this sandbox runs no notebooks"));
+    if (claimed === "run_not_active") {
+      await this.#fail(row, failure("run_not_active", "the run is not active"));
       return;
     }
-    // Starting a kernel (KOBE-477) only to an agent that knows the op: an older one can't read it.
-    if (
-      row.kind === "notebook.restart" &&
-      row.frame.op === "start" &&
-      !this.#host.hasCapability(CAPABILITY_NOTEBOOK_START)
-    ) {
-      await this.#fail(
-        row,
-        failure(COMMAND_FAILURES.kernelStartUnsupported, "this sandbox can't start a kernel alone"),
-      );
-      return;
-    }
+    await this.#issue(row, commandId, frame, claimed, starts);
+  }
 
-    // The context viewer (KOBE-470): the member's own sandbox only, and only an agent that knows it.
+  /** The agent can take the command and the thread's session is in place; else it is answered. */
+  async #deliverable(row: CommandRow, frame: DeliverableFrame): Promise<boolean> {
+    const refused = deliveryRefusal(this.#env, row, frame);
+    if (refused) {
+      await (refused.endsRun
+        ? this.#failRunStart(row, refused.outcome)
+        : this.#fail(row, refused.outcome));
+      return false;
+    }
     // After a wake the thread's session may be missing: restore it first, as for a run start.
     if (row.kind === "thread.context") {
-      if (
-        this.#host.target.evalThreadId !== undefined ||
-        !this.#host.hasCapability(CAPABILITY_THREAD_CONTEXT)
-      ) {
-        await this.#fail(
-          row,
-          failure(
-            COMMAND_FAILURES.contextUnsupported,
-            "this sandbox can't read a thread's context",
-          ),
-        );
-        return;
-      }
       const session = await this.#ensureSession(row.threadId);
       if (!session.ok) {
         await this.#fail(row, failure(COMMAND_FAILURES.sessionUnavailable, session.error.message));
-        return;
+        return false;
       }
-    }
-    // A stop still reaches a run the server already ended (Stop, budget, failed start): ending
-    // it in Postgres first is what refuses its late frames, and Pi must still be told to abort.
-    if (
-      (row.kind === "run.steer" && !this.#host.hasLiveLease(row.runId ?? "")) ||
-      (row.kind === "run.stop" && !this.#host.hasLease(row.runId ?? ""))
-    ) {
-      await this.#fail(row, failure("run_not_active", "the run is not active on this sandbox"));
-      return;
-    }
-    if (
-      row.kind === "run.start" &&
-      (frame as RunStartFrame).config?.skill_bundles?.length &&
-      !this.#host.hasCapability(CAPABILITY_SKILL_BUNDLES)
-    ) {
-      // Never start a run without the skills it was resolved with, and never send fields the agent
-      // doesn't know: an agent that can't materialize skills fails the run visibly.
-      await this.#failRunStart(
-        row,
-        failure(
-          COMMAND_FAILURES.skillsUnsupported,
-          "this sandbox's agent is too old to load skills; it must be upgraded",
-        ),
-      );
-      return;
-    }
-    if (row.kind === "run.start" && legacyBuiltins(row)) {
-      // A run.start queued before KOBE-317 lists image built-ins, which no frame carries any more
-      // (they are catalog bundles now): the run fails visibly rather than starting without the
-      // skills it was resolved with. Sending it again resolves them as Kobe's catalog skills.
-      await this.#failRunStart(
-        row,
-        failure(
-          COMMAND_FAILURES.queuedBeforeUpgrade,
-          "this run was queued before an upgrade and lists skills this sandbox no longer has; send it again",
-        ),
-      );
-      return;
-    }
-    // A compaction summarizes with its run's token: never to an agent that can't take one.
-    if (
-      row.kind === "thread.compact" &&
-      !(
-        ctx.runTokenKey &&
-        this.#host.hasCapability(CAPABILITY_THREAD_COMPACT) &&
-        this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
-      )
-    ) {
-      await this.#failRunStart(
-        row,
-        failure(COMMAND_FAILURES.compactUnsupported, "this sandbox's agent can't compact"),
-      );
-      return;
-    }
-    // A branch summary likewise (KOBE-548).
-    if (
-      row.kind === "thread.branch_summary" &&
-      !(
-        ctx.runTokenKey &&
-        this.#host.hasCapability(CAPABILITY_THREAD_BRANCH_SUMMARY) &&
-        this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
-      )
-    ) {
-      await this.#failRunStart(
-        row,
-        failure(
-          COMMAND_FAILURES.branchSummaryUnsupported,
-          "this sandbox's agent can't summarize a branch",
-        ),
-      );
-      return;
     }
     // KOBE-409 review M1: the memory query embedding runs beside the session restore and the
     // claim (usually started already when the message was accepted, on the replica that took it).
+    const { teamId, userId } = this.#host.target;
     if (
       row.kind === "run.start" &&
       row.runId !== null &&
@@ -633,102 +444,24 @@ export class CommandDelivery {
         message: (frame as RunStartFrame).message,
       });
     }
-    const starts = startsRun(row.kind);
-    if (starts) {
-      const session = await this.#ensureSession(row.threadId);
-      if (!session.ok) {
-        await this.#failRunStart(
-          row,
-          failure(COMMAND_FAILURES.sessionUnavailable, session.error.message),
-        );
-        return;
-      }
-    }
-    const claimed = await withTeam(ctx.db, teamId, async (tx) => {
-      // Only the sandbox's current connection delivers (a replaced one may not have noticed yet).
-      const evalThreadId = this.#host.target.evalThreadId;
-      const current = await tx.execute(
-        evalThreadId === undefined
-          ? sql`
-        SELECT 1 FROM sandbox_connections
-         WHERE team_id = ${teamId} AND user_id = ${userId}
-           AND connection_id = ${this.#host.id} AND closed_at IS NULL
-         FOR SHARE`
-          : sql`
-        SELECT 1 FROM sandbox_eval_connections
-         WHERE team_id = ${teamId} AND thread_id = ${evalThreadId} AND user_id = ${userId}
-           AND connection_id = ${this.#host.id} AND closed_at IS NULL
-         FOR SHARE`,
-      );
-      if (current.rowCount !== 1) return "replaced" as const;
-      // An eval sandbox (KOBE-325) takes only its own thread's commands (the slot already says so).
-      if (evalThreadId !== undefined && row.threadId !== evalThreadId) return "gone" as const;
-      if (row.kind === "notebook.execute") {
-        // KOBE-464: never run a cell for a run that ended meanwhile (Stop while the sandbox woke).
-        // FOR SHARE holds off a concurrent Stop until this delivery is recorded.
-        const res = await tx.execute<{ status: string }>(sql`
-          SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${row.runId ?? null}
-             FOR SHARE`);
-        const status = res.rows[0]?.status;
-        if (status !== "running" && status !== "waiting_approval") {
-          return "run_not_active" as const;
-        }
-      }
-      if (starts) {
-        // Holds off a concurrent Stop (KOBE-30) until the lease is recorded: a Stop that commits
-        // first is seen here (not active → refused); one that commits later finds the lease and
-        // its run.stop follows this run.start on the same connection.
-        await tx.execute(sql`
-          SELECT 1 FROM runs WHERE team_id = ${teamId} AND id = ${row.runId ?? null} FOR SHARE`);
-        const run = await loadRun(tx, teamId, row.runId ?? "");
-        if (
-          !run ||
-          run.ownerUserId !== userId ||
-          run.threadId !== row.threadId ||
-          (run.status !== "running" && run.status !== "waiting_approval")
-        ) {
-          return "run_not_active" as const;
-        }
-        const leased = await tx.execute(sql`
-          INSERT INTO sandbox_run_leases (team_id, run_id, user_id, slot, thread_id, sandbox_id)
-          VALUES (${teamId}, ${row.runId}, ${userId}, ${slotOf(this.#host.target)}, ${row.threadId},
-                  ${this.#host.sandboxId})
-          ON CONFLICT (team_id, run_id) DO UPDATE
-            SET sandbox_id = EXCLUDED.sandbox_id, leased_at = now()
-            WHERE sandbox_run_leases.user_id = EXCLUDED.user_id
-              AND sandbox_run_leases.thread_id = EXCLUDED.thread_id
-              AND sandbox_run_leases.slot = EXCLUDED.slot
-              AND (sandbox_run_leases.slot = ''
-                OR sandbox_run_leases.sandbox_id = EXCLUDED.sandbox_id)`);
-        if (leased.rowCount !== 1) return "run_not_active" as const;
-        if (!(await markDelivered(tx, teamId, row.id, this.#host.id))) return "gone" as const;
-        // Only to agents that can hand it to Pi alone (KOBE-118); older ones keep the legacy path.
-        // A compaction always has one (checked above).
-        const runToken =
-          ctx.runTokenKey && this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
-            ? await mintRunToken(tx, {
-                key: ctx.runTokenKey,
-                teamId,
-                runId: row.runId ?? "",
-                sandboxId: this.#host.sandboxId,
-                ttlSeconds: ctx.tuning.runTokenTtlSeconds,
-              })
-            : undefined;
-        return { cursor: run.sandboxSeq, runToken, startedAt: run.startedAt };
-      }
-      return (await markDelivered(tx, teamId, row.id, this.#host.id))
-        ? { cursor: 0, runToken: undefined, startedAt: null }
-        : ("gone" as const);
-    });
-    if (claimed === "gone") return; // expired or taken meanwhile
-    if (claimed === "replaced") {
-      this.#host.replaced();
-      return;
-    }
-    if (claimed === "run_not_active") {
-      await this.#fail(row, failure("run_not_active", "the run is not active"));
-      return;
-    }
+    if (!startsRun(row.kind)) return true;
+    const session = await this.#ensureSession(row.threadId);
+    if (session.ok) return true;
+    await this.#failRunStart(
+      row,
+      failure(COMMAND_FAILURES.sessionUnavailable, session.error.message),
+    );
+    return false;
+  }
+
+  /** A claimed command: leased, remembered as issued under `commandId`, and sent. */
+  async #issue(
+    row: CommandRow,
+    commandId: string,
+    frame: DeliverableFrame,
+    claimed: Claimed,
+    starts: boolean,
+  ): Promise<void> {
     if (starts && row.runId !== null) {
       this.#host.leaseRun(
         row.runId,
@@ -738,7 +471,7 @@ export class CommandDelivery {
         claimed.startedAt,
       );
     }
-    const traced = starts ? this.#traceContext(row, frame) : undefined;
+    const traced = starts ? traceContext(this.#env, row, frame) : undefined;
     this.#host.leaseThread(row.threadId);
     const execId = (frame as { exec_id?: unknown }).exec_id;
     this.#issued.set(commandId, {
@@ -752,146 +485,23 @@ export class CommandDelivery {
         ? { notebook: { runId: row.runId, threadId: row.threadId, execId } }
         : {}),
     });
-    ctx.metrics.commandsDelivered += 1;
+    this.#ctx.metrics.commandsDelivered += 1;
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.
-    if (row.kind === "thread.compact") {
-      if (claimed.runToken === undefined) throw new Error("compaction delivered without a token");
-      this.#host.send({
-        ...withoutTrace(frame as ThreadCompactFrame),
-        ...(traced ? { trace: traced } : {}),
-        run_token: claimed.runToken,
-      });
-      return;
-    }
-    if (row.kind === "thread.branch_summary") {
-      if (claimed.runToken === undefined)
-        throw new Error("branch summary delivered without a token");
-      this.#host.send({
-        ...withoutTrace(frame as ThreadBranchSummaryFrame),
-        ...(traced ? { trace: traced } : {}),
-        run_token: claimed.runToken,
-      });
-      return;
-    }
-    const base = starts
-      ? ({
-          ...withoutTrace(frame as RunStartFrame),
-          ...(traced ? { trace: traced } : {}),
-        } as RunStartFrame)
-      : frame;
-    let out = (
-      claimed.runToken ? { ...base, run_token: claimed.runToken } : base
-    ) as ServerToSandboxFrame;
-    // Project files: the user's workspace is brought in line with their memberships before the
-    // sandbox pulls it at run start (KOBE-162). Never blocks or fails the run; see ProjectMounts.
-    // An eval sandbox (KOBE-325) has no member workspace and gets no memory: an eval sees only
-    // its case's fixtures, the same for every member.
-    const evalSandbox = this.#host.target.evalThreadId !== undefined;
-    if (row.kind === "run.start" && !evalSandbox) {
-      const { teamId, userId } = this.#host.target;
-      await this.#ctx.projectMounts?.reconcileUser(teamId, userId);
-    }
-    // Memory indexes only reach agents that know the field (KOBE-156).
-    // The agent version's memory setting (KOBE-646): `off` sends no memory at all (the sandbox
-    // then lists no memory tools; the policy check denies them too).
-    // Semantic memory (KOBE-382) rides inside it, only for agents announcing `semantic_memory`:
-    // the full block for `all`, Site Policy alone for `notes_only` and `off` (Policy reaches every
-    // run, Chris 2026-11-13), nothing for evals, eval cases or builder test chats.
-    const plan =
-      row.kind === "run.start" && !evalSandbox && this.#host.hasCapability(CAPABILITY_MEMORY)
-        ? await this.#memoryPlan(row.runId)
-        : undefined;
-    if (plan !== undefined && row.runId !== null) {
-      const memory = plan.notes ? await this.#runMemory(row.threadId) : undefined;
-      const semantic =
-        plan.policy && this.#host.hasCapability(CAPABILITY_SEMANTIC_MEMORY)
-          ? await this.#runSemantic(row.runId, row.threadId, (frame as RunStartFrame).message, {
-              policyOnly: !plan.semantic,
-              // KOBE-658: an agent that renders the placement gets the Site's; others `system`.
-              agentPlaces: this.#host.hasCapability(CAPABILITY_SEMANTIC_MEMORY_PLACEMENT),
-            })
-          : undefined;
-      if (memory || semantic) {
-        // Without Notes (`off`, or their read failed) the envelope lists no Notes scope.
-        const notes = memory ?? { scopes: [], indexes: [] };
-        out = {
-          ...out,
-          memory: semantic ? { ...notes, semantic: semantic.semantic } : notes,
-        } as ServerToSandboxFrame;
-        // Recorded once the sandbox accepts the start (`settle`), as sync conflicts are told.
-        const issued = this.#issued.get(commandId);
-        if (semantic?.fresh === true && issued !== undefined) {
-          this.#memoryRecords.set(issued, { runId: row.runId, items: semantic.semantic.items });
-        }
-      }
-    }
-    // Project instructions only reach agents that know the field (KOBE-159): an older agent runs
-    // without them rather than failing on an unknown key.
-    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_PROJECTS)) {
-      const { project: _project, ...rest } = out as RunStartFrame;
-      out = rest as ServerToSandboxFrame;
-    }
-    // App cards (KOBE-440): an agent that cannot append them starts below them (Pi does not know
-    // them), so its model does not see them, and the run does not fail on an unknown parent.
-    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_APP_CARDS)) {
-      out = withoutAppCards(out as RunStartFrame) as ServerToSandboxFrame;
-    }
-    // The viewed file (KOBE-462) only reaches agents that fence it; an older one runs without it.
-    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_FILE_EDITS)) {
-      const { viewing: _viewing, ...rest } = out as RunStartFrame;
-      out = rest as ServerToSandboxFrame;
-    }
-    // Sync conflicts of this thread its agent was not told about (KOBE-492): marked told here.
-    if (
-      row.kind === "run.start" &&
-      !evalSandbox &&
-      this.#host.hasCapability(CAPABILITY_SYNC_CONFLICTS)
-    ) {
-      const notes = await this.#runConflicts(row.threadId);
-      if (notes.conflicts.length > 0) {
-        out = { ...out, sync_conflicts: [...notes.conflicts] } as ServerToSandboxFrame;
-        // Told once the sandbox accepts the run (`settle`); a lost start leaves them untold.
-        const issued = this.#issued.get(commandId);
-        if (issued !== undefined) this.#conflictNotes.set(issued, notes.ids);
-      }
-    }
-    // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
-    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
-      const { mcp: _mcp, ...rest } = out as RunStartFrame;
-      out = rest as ServerToSandboxFrame;
-    }
+    const wire = wireFrame(row, frame, claimed, traced, starts);
+    const out =
+      row.kind === "run.start"
+        ? await prepareRunStart(this.#env, row, frame as RunStartFrame, wire, {
+            recordMemory: (pending) => {
+              const issued = this.#issued.get(commandId);
+              if (issued !== undefined) this.#memoryRecords.set(issued, pending);
+            },
+            conflictsCarried: (ids) => {
+              const issued = this.#issued.get(commandId);
+              if (issued !== undefined) this.#conflictNotes.set(issued, ids);
+            },
+          })
+        : wire;
     this.#host.send(out);
-  }
-
-  /**
-   * The trace context a start command keeps (KOBE-274): only for agents with `trace_spans`, only
-   * when this replica relays spans; the command span it names becomes a kept parent.
-   */
-  #traceContext(row: CommandRow, frame: object): WireTraceContext | undefined {
-    const trace = "trace" in frame ? (frame.trace as WireTraceContext | undefined) : undefined;
-    if (
-      trace === undefined ||
-      row.runId === null ||
-      !this.#ctx.traceRelay ||
-      !this.#host.hasCapability(CAPABILITY_TRACE_SPANS)
-    ) {
-      return undefined;
-    }
-    const parsed = parseTraceparent(trace.traceparent);
-    if (parsed === undefined || parsed.traceId !== runTraceId(row.runId)) return undefined;
-    this.#host.traceStarted(row.runId, parsed.parentSpanId);
-    return trace;
-  }
-
-  /** `run.start.sync_conflicts`; a failed read means no note (the rows stay untold). */
-  async #runConflicts(threadId: string): Promise<AgentNotes> {
-    try {
-      const { teamId, userId } = this.#host.target;
-      return await untoldNotes(this.#ctx.db, { teamId, userId }, threadId);
-    } catch (err) {
-      this.#host.log.warn({ err }, "run.start.sync_conflicts could not be read; sent without it");
-      return { ids: [], conflicts: [] };
-    }
   }
 
   /** A `run.start` that carried sync conflicts was accepted: they are told now (KOBE-492). */
@@ -904,81 +514,6 @@ export class CommandDelivery {
     void markTold(this.#ctx.db, { teamId, userId }, ids).catch((err: unknown) =>
       this.#host.log.warn({ err }, "sync conflicts could not be marked told"),
     );
-  }
-
-  /** The run's memory plan (KOBE-646); unreadable means no memory (fail closed). */
-  async #memoryPlan(runId: string | null): Promise<RunMemoryPlan | undefined> {
-    if (runId === null) return undefined;
-    const { teamId } = this.#host.target;
-    try {
-      return await withTeam(this.#ctx.db, teamId, (tx) => readRunMemoryPlan(tx, { teamId, runId }));
-    } catch (err) {
-      this.#host.log.warn(
-        { err },
-        "the run's memory setting could not be read; sent without memory",
-      );
-      return undefined;
-    }
-  }
-
-  /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */
-  async #runMemory(
-    threadId: string,
-  ): Promise<Awaited<ReturnType<typeof buildRunMemory>> | undefined> {
-    try {
-      return await buildRunMemory(this.#ctx.memory, { ...this.#host.target, threadId });
-    } catch (err) {
-      this.#host.log.warn({ err }, "run.start.memory could not be built; sent without it");
-      return undefined;
-    }
-  }
-
-  /**
-   * `run.start.memory.semantic` (KOBE-382), picked for this message and recorded with the run. A
-   * failure sends the run without the block (fail closed: nothing recorded either).
-   */
-  async #runSemantic(
-    runId: string,
-    threadId: string,
-    message: string,
-    opts: { readonly policyOnly: boolean; readonly agentPlaces: boolean },
-  ): Promise<{ readonly semantic: RunSemanticMemory; readonly fresh: boolean } | undefined> {
-    const { teamId, userId } = this.#host.target;
-    // KOBE-409: the vector leg (query embedding, paid by the run's member, then the nearest items)
-    // starts once the switches allow a lane and runs beside the keyword read; late or failed:
-    // keywords alone.
-    const embeddings = this.#ctx.memoryEmbeddings;
-    const vectorLeg =
-      opts.policyOnly || embeddings === undefined
-        ? undefined
-        : () =>
-            startVectorLeg(
-              this.#ctx.db,
-              { teamId, userId },
-              embeddings.queryVector({ teamId, userId, threadId, runId, message }),
-            );
-    const input = {
-      teamId,
-      userId,
-      threadId,
-      runId,
-      message,
-      ...opts,
-      ...(vectorLeg ? { vectorLeg } : {}),
-    };
-    try {
-      return await withTeam(this.#ctx.db, teamId, (tx) => buildRunSemantic(tx, input));
-    } catch (err) {
-      this.#host.log.warn({ err }, "run.start.memory.semantic could not be built; Policy only");
-    }
-    // Fail closed to Policy only (L5): a broken lane never drops the Site's Policy.
-    try {
-      const policy = await withTeam(this.#ctx.db, teamId, (tx) => buildPolicyOnly(tx, input));
-      return policy === undefined ? undefined : { semantic: policy, fresh: true };
-    } catch (err) {
-      this.#host.log.warn({ err }, "run.start Site Policy could not be read; sent without it");
-      return undefined;
-    }
   }
 
   /** A `run.start` that carried freshly picked memories was accepted: record them (KOBE-382). */
@@ -995,292 +530,7 @@ export class CommandDelivery {
 
   async #failRunStart(row: CommandRow, outcome: CommandOutcome): Promise<void> {
     await this.#fail(row, outcome);
-    if (row.runId !== null && !outcome.ok) await this.#endRun(row.runId, row.threadId, outcome);
+    if (row.runId !== null && !outcome.ok)
+      await endRun(this.#env, row.runId, row.threadId, outcome);
   }
-
-  async #endRun(runId: string, threadId: string, outcome: CommandOutcome): Promise<void> {
-    const { teamId } = this.#host.target;
-    // The sandbox's error code with the server's own message: its text is untrusted (logged above).
-    const end = outcome.ok
-      ? ({ status: "completed" } as const)
-      : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
-    // A refused start: Pi's entries say whether it holds the prompt (KOBE-290). Network I/O before
-    // the transaction; unreadable entries keep nothing (Pi's own entry comes with the next sync).
-    const read = outcome.ok ? undefined : await this.fetchNewEntries(threadId);
-    const prompt: PromptSource | undefined =
-      read === undefined ? undefined : { kind: "pi", entries: read, otherwise: "unsent" };
-    const { ended } = await this.#endTx(outcome, runId, threadId, "message", async (tx) => {
-      const result = await endRunInTx(
-        tx,
-        teamId,
-        runId,
-        end,
-        undefined,
-        prompt,
-        this.#ctx.serverCalls,
-      );
-      // Ended before (Stop while the sandbox prepared the run): the prompt is kept all the same.
-      if (!result.ended && prompt !== undefined) {
-        await keepRunPromptInTx(tx, teamId, runId, prompt, {
-          leaf: "if_latest",
-          maxEntries: this.#ctx.tuning.threadMaxEntries,
-          maxBytes: this.#ctx.tuning.runMaxBytes,
-        });
-      }
-      return result;
-    });
-    this.#host.endLease(runId);
-    if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
-  }
-
-  /**
-   * A compaction answered (KOBE-213): Pi appended a `compaction` entry it does not announce, so
-   * the thread's new entries are fetched and mirrored like a settled run's, then the run ends
-   * (its token is revoked by the run end trigger). Pi's error text is logged, never stored.
-   */
-  async #endCompaction(runId: string, threadId: string, outcome: CommandOutcome): Promise<void> {
-    const { teamId } = this.#host.target;
-    if (!outcome.ok) {
-      const detail = {
-        run_id: runId,
-        code: outcome.error.code,
-        error: outcome.error.message.slice(0, 300),
-      };
-      // A tampered runtime is a security event: logged here, audited with the run end (KOBE-271).
-      if (tampered(outcome)) {
-        this.#host.log.warn(
-          { ...detail, sandbox_id: this.#host.sandboxId, security: true },
-          "compaction stopped: Pi's runtime was tampered with",
-        );
-      } else {
-        this.#host.log.info(detail, "compaction failed in the sandbox");
-      }
-    }
-    const entries = outcome.ok ? await this.fetchNewEntries(threadId) : undefined;
-    const end = outcome.ok
-      ? ({ status: "completed" } as const)
-      : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
-    const { ended } = await this.#endTx(outcome, runId, threadId, "compaction", async (tx) => {
-      if (entries !== undefined) {
-        const mirrored = await mirrorEntriesInTx(
-          tx,
-          teamId,
-          threadId,
-          entries,
-          this.#ctx.tuning.threadMaxEntries,
-        );
-        if (mirrored.capped) {
-          this.#host.log.warn({ thread_id: threadId }, "thread entry cap reached");
-          this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
-        }
-        // CT13: the compaction entry is the new leaf; its stream hears it before the end (a run
-        // that already ended, e.g. cancelled, takes no more events).
-        const moved = leafMovedEvents(threadId, mirrored.leafMovedTo);
-        if (moved.length > 0 && (await runStillOpen(tx, teamId, runId))) {
-          await appendRunEventsInTx(tx, teamId, runId, moved);
-        }
-      }
-      return endRunInTx(tx, teamId, runId, end);
-    });
-    this.#host.endLease(runId);
-    if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
-  }
-
-  /**
-   * A branch summary answered (KOBE-548, CT11): Pi appended a `branch_summary` entry, fetched and
-   * mirrored like a compaction's; the reported entry becomes the thread's leaf and the run's stream
-   * hears `thread.updated {leaf_entry_id}` before the run ends. A success whose entry did not
-   * arrive (or is not a summary under the reported parent) fails the run `summary_failed` and
-   * leaves the leaf. Pi's and the sandbox's text is logged, never stored.
-   */
-  async #endBranchSummary(
-    rowId: string,
-    runId: string,
-    threadId: string,
-    outcome: CommandOutcome,
-  ): Promise<void> {
-    const { teamId } = this.#host.target;
-    if (!outcome.ok) {
-      const detail = {
-        run_id: runId,
-        code: outcome.error.code,
-        error: outcome.error.message.slice(0, 300),
-      };
-      if (tampered(outcome)) {
-        this.#host.log.warn(
-          { ...detail, sandbox_id: this.#host.sandboxId, security: true },
-          "branch summary stopped: Pi's runtime was tampered with",
-        );
-      } else {
-        this.#host.log.info(detail, "branch summary failed in the sandbox");
-      }
-    }
-    const reported = outcome.ok ? parseBranchSummaryResult(outcome.data) : undefined;
-    if (outcome.ok && reported === undefined) {
-      this.#host.log.warn({ run_id: runId }, "the sandbox sent a malformed branch summary result");
-    }
-    const entries = reported !== undefined ? await this.fetchNewEntries(threadId) : undefined;
-    const { ended, status } = await this.#endTx(
-      outcome,
-      runId,
-      threadId,
-      "branch_summary",
-      async (tx) => {
-        let code = outcome.ok ? "summary_failed" : outcome.error.code;
-        if (reported !== undefined) {
-          const command = await tx.execute<{ to_entry_id: string | null }>(sql`
-            SELECT frame ->> 'to_entry_id' AS to_entry_id FROM sandbox_commands
-             WHERE team_id = ${teamId} AND id = ${rowId}`);
-          const mirrored = await mirrorBranchSummaryInTx(tx, {
-            toEntryId: command.rows[0]?.to_entry_id ?? "",
-            teamId,
-            threadId,
-            runId,
-            entries,
-            reported,
-            maxEntries: this.#ctx.tuning.threadMaxEntries,
-          });
-          if (mirrored.capped) {
-            this.#host.log.warn({ thread_id: threadId }, "thread entry cap reached");
-            this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
-          }
-          if (mirrored.ok) code = "";
-          else this.#host.log.warn({ run_id: runId }, "the branch summary entry was not mirrored");
-        }
-        const end =
-          code === ""
-            ? ({ status: "completed" } as const)
-            : ({ status: "failed", error: failureInfo(code, "start_failed") } as const);
-        const result = await endRunInTx(tx, teamId, runId, end);
-        return { ...result, status: end.status };
-      },
-    );
-    this.#host.endLease(runId);
-    if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status });
-  }
-
-  /**
-   * The transaction ending a run (`withAppendTx`). For a tampered runtime it also writes
-   * `sandbox.runtime_tampered` as its last write, and the row alone if it cannot commit (KOBE-271).
-   */
-  #endTx<T>(
-    outcome: CommandOutcome,
-    runId: string,
-    threadId: string,
-    runKind: RuntimeTamperReport["runKind"],
-    work: (tx: KobeTx) => Promise<T>,
-  ): Promise<T> {
-    const { db } = this.#ctx;
-    const { teamId } = this.#host.target;
-    if (!tampered(outcome)) return withAppendTx(db, teamId, work);
-    const report = this.#tamper(runId, threadId, runKind);
-    return withTamperAudit(db, report, this.#host.log, () =>
-      withAppendTx(db, teamId, async (tx) => {
-        const result = await work(tx);
-        await auditRuntimeTamperInTx(tx, report);
-        return result;
-      }),
-    );
-  }
-
-  /**
-   * A `pi.command` (the wire's own `get_entries`, or a row's) was answered `runtime_tampered`: the
-   * agent stopped the thread's Pi as an expected close, ended its run there and sends no
-   * `pi.exited` (KOBE-607). Every live message run of the thread is failed `runtime_tampered` with
-   * its audit row and its lease ended, so it neither stays `running` nor blocks hibernation.
-   * Compactions and branch summaries are left alone: their own result ends them.
-   */
-  async #tamperedMidRun(threadId: string, outcome: CommandOutcome): Promise<void> {
-    if (outcome.ok) return;
-    const runs = this.#host.liveMessageRuns(threadId);
-    this.#host.log.warn(
-      {
-        thread_id: threadId,
-        run_ids: runs,
-        sandbox_id: this.#host.sandboxId,
-        error: outcome.error.message.slice(0, 300),
-        security: true,
-      },
-      "Pi stopped mid-run: its runtime was tampered with",
-    );
-    const { teamId } = this.#host.target;
-    const end = {
-      status: "failed",
-      error: failureInfo(outcome.error.code, "start_failed"),
-    } as const;
-    for (const runId of runs) {
-      try {
-        const { ended } = await this.#endTx(outcome, runId, threadId, "message", (tx) =>
-          endRunInTx(tx, teamId, runId, end),
-        );
-        this.#host.endLease(runId);
-        if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
-      } catch (err) {
-        // The row was written on its own (withTamperAudit); the lost-run sweep ends the run.
-        this.#host.endLease(runId);
-        this.#host.log.error({ err, run_id: runId }, "could not end a run stopped for tampering");
-      }
-    }
-  }
-
-  /** The ids of a tampered-runtime report from this connection (KOBE-271). */
-  #tamper(
-    runId: string,
-    threadId: string,
-    runKind: RuntimeTamperReport["runKind"],
-  ): RuntimeTamperReport {
-    const { teamId, userId } = this.#host.target;
-    const { sandboxId } = this.#host;
-    return { teamId, userId, sandboxId, replicaId: this.#ctx.replicaId, threadId, runId, runKind };
-  }
-
-  async #record(issued: Extract<IssuedCommand, { kind: "row" }>, outcome: CommandOutcome) {
-    const { teamId } = this.#host.target;
-    // The compaction's entry is mirrored and its run ended before its requester hears back; if
-    // that fails the requester still hears back (and ends the run itself).
-    if (issued.commandKind === "thread.compact" && issued.runId !== null) {
-      await this.#endCompaction(issued.runId, issued.threadId, outcome).catch((err: unknown) =>
-        this.#host.log.error({ err, run_id: issued.runId }, "could not end a compaction run"),
-      );
-    }
-    if (issued.commandKind === "thread.branch_summary" && issued.runId !== null) {
-      await this.#endBranchSummary(issued.rowId, issued.runId, issued.threadId, outcome).catch(
-        (err: unknown) =>
-          this.#host.log.error({ err, run_id: issued.runId }, "could not end a branch summary run"),
-      );
-    }
-    // A row `pi.command` refused for a tampered runtime: the agent stopped that thread's Pi.
-    if (issued.commandKind === "pi.command" && tampered(outcome)) {
-      await this.#tamperedMidRun(issued.threadId, outcome).catch((err: unknown) =>
-        this.#host.log.error({ err, thread_id: issued.threadId }, "could not end tampered runs"),
-      );
-    }
-    await withTeam(this.#ctx.db, teamId, (tx) =>
-      completeCommand(tx, this.#ctx.bus, teamId, issued.rowId, outcome, this.#host.id),
-    );
-    if (issued.requesterReplica === this.#ctx.replicaId) this.#ctx.localResult(issued.rowId);
-    if (issued.commandKind !== "run.start" || issued.runId === null) return;
-    // A rejected prompt, or one Pi handled without starting work, ends the run without
-    // `agent_settled` (KOBE-23).
-    const handled =
-      outcome.ok &&
-      (outcome.data as { disposition?: unknown } | undefined)?.disposition === "handled";
-    if (!outcome.ok || handled) await this.#endRun(issued.runId, issued.threadId, outcome);
-  }
-}
-
-/** A start frame without its trace context (added back only when the agent may take it). */
-function withoutTrace<F extends RunStartFrame | ThreadCompactFrame | ThreadBranchSummaryFrame>(
-  frame: F,
-): Omit<F, "trace"> {
-  const { trace: _trace, ...rest } = frame;
-  return rest;
-}
-
-/** A start without its app cards: the branch point moves to the first card's parent. */
-export function withoutAppCards(frame: RunStartFrame): RunStartFrame {
-  const { app_cards: cards, parent_entry_id: _parent, ...rest } = frame;
-  if (cards === undefined || cards.length === 0) return frame;
-  const below = cards[0]?.parentId ?? null;
-  return below === null ? rest : { ...rest, parent_entry_id: below };
 }

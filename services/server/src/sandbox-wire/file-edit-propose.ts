@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import {
+  CAPABILITY_FILE_EDITS,
   EVENT_PAYLOAD_MAX_BYTES,
   jsonByteLength,
   PROJECT_FILE_MAX_BYTES,
@@ -11,7 +12,6 @@ import {
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import type { Logger } from "pino";
-import type { AllowedVerdict } from "../artifacts/allowed.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { loadAccess } from "../projects/access.js";
 import { clashesInTree } from "../projects/from-proposal.js";
@@ -19,6 +19,7 @@ import { headOf, loadTree } from "../projects/tree.js";
 import { pathIsTaken } from "../workspace-files/browse.js";
 import { ancestorsOf, areaOf, isInternalPath, isReadOnlyPath } from "../workspace-files/paths.js";
 import { currentEntry } from "../workspace-sync/store.js";
+import type { ToolFrameSpec } from "./gated-frame.js";
 import type { SandboxTarget } from "./types.js";
 
 /**
@@ -33,11 +34,6 @@ export interface FileEditProposeConnection {
   readonly target: SandboxTarget;
   readonly runMaxEvents: number;
   readonly log: Pick<Logger, "error" | "warn">;
-  readonly hasCapability: boolean;
-  /** `#checkToolRun` for this frame; "violation" was already answered and the frame dropped. */
-  readonly runCheck: () => "ok" | "ended" | "violation";
-  /** Takes the allowance (single use): a second frame for the call is "replayed". */
-  readonly verdict: () => AllowedVerdict | "replayed";
   send(frame: ServerToSandboxFrame): boolean;
 }
 
@@ -47,8 +43,11 @@ export type ProposeOutcome =
 
 const refused = (code: string, message: string): ProposeOutcome => ({ ok: false, code, message });
 
-export function onFileEditPropose(c: FileEditProposeConnection, frame: FileEditProposeFrame): void {
-  const answer = (outcome: ProposeOutcome) =>
+/** The gate's spec for `file.edit_propose`: the allowance is taken once (`consume`). */
+export function fileEditProposeSpec(
+  c: FileEditProposeConnection,
+): ToolFrameSpec<FileEditProposeFrame, "consume"> {
+  const answerer = (frame: FileEditProposeFrame) => (outcome: ProposeOutcome) =>
     c.send(
       outcome.ok
         ? {
@@ -69,42 +68,57 @@ export function onFileEditPropose(c: FileEditProposeConnection, frame: FileEditP
             error: { code: outcome.code, message: outcome.message },
           },
     );
-  if (!c.hasCapability) {
-    answer(refused("not_allowed", "This sandbox did not announce file edits."));
-    return;
-  }
-  // A skill eval's sandbox (KOBE-325) never reaches the member's workspace (also denied by policy).
-  if (c.target.evalThreadId !== undefined) {
-    answer(refused("not_allowed", "Skill evals never propose edits to the member's files."));
-    return;
-  }
-  const check = c.runCheck();
-  if (check === "violation") return;
-  if (check === "ended") {
-    answer(refused("not_allowed", "The run has ended, so the edit was not proposed."));
-    return;
-  }
-  const verdict = c.verdict();
-  if (verdict !== "ok") {
-    c.log.warn({ run_id: frame.run_id, verdict, security: true }, "file.edit_propose refused");
-    answer(
-      refused(
-        "not_allowed",
-        verdict === "input_mismatch"
-          ? "The edit differs from the call that was allowed."
-          : verdict === "replayed"
-            ? "This tool call was already used to propose an edit."
-            : "This tool call was not allowed for this tool.",
-      ),
-    );
-    return;
-  }
-  void proposeFileEdit(c.db, c.target, frame, c.runMaxEvents)
-    .catch((err: unknown): ProposeOutcome => {
-      c.log.error({ err, run_id: frame.run_id }, "file.edit_propose failed");
-      return refused("storage_failed", "The proposal could not be recorded. Try again.");
-    })
-    .then(answer);
+  return {
+    capabilities: [CAPABILITY_FILE_EDITS],
+    allowance: "consume",
+    // A skill eval's sandbox (KOBE-325) never reaches the member's workspace (also denied by policy).
+    beforeRun(frame) {
+      if (c.target.evalThreadId === undefined) return false;
+      answerer(frame)(
+        refused("not_allowed", "Skill evals never propose edits to the member's files."),
+      );
+      return true;
+    },
+    refuse(frame, refusal) {
+      const answer = answerer(frame);
+      switch (refusal.stage) {
+        case "capability":
+          answer(refused("not_allowed", "This sandbox did not announce file edits."));
+          return;
+        case "ended":
+          answer(refused("not_allowed", "The run has ended, so the edit was not proposed."));
+          return;
+        case "verdict": {
+          const { verdict } = refusal;
+          c.log.warn(
+            { run_id: frame.run_id, verdict, security: true },
+            "file.edit_propose refused",
+          );
+          answer(
+            refused(
+              "not_allowed",
+              verdict === "input_mismatch"
+                ? "The edit differs from the call that was allowed."
+                : verdict === "replayed"
+                  ? "This tool call was already used to propose an edit."
+                  : "This tool call was not allowed for this tool.",
+            ),
+          );
+          return;
+        }
+        case "busy":
+          return; // no in-flight cap for this kind
+      }
+    },
+    act(frame) {
+      void proposeFileEdit(c.db, c.target, frame, c.runMaxEvents)
+        .catch((err: unknown): ProposeOutcome => {
+          c.log.error({ err, run_id: frame.run_id }, "file.edit_propose failed");
+          return refused("storage_failed", "The proposal could not be recorded. Try again.");
+        })
+        .then(answerer(frame));
+    },
+  };
 }
 
 /**

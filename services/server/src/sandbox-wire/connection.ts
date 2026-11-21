@@ -1,82 +1,67 @@
 import { randomUUID } from "node:crypto";
 import {
-  CAPABILITY_ARTIFACTS,
-  CAPABILITY_FILE_EDITS,
-  CAPABILITY_NOTEBOOKS,
-  CAPABILITY_FILES,
-  CAPABILITY_MEMORY,
-  CAPABILITY_SEMANTIC_MEMORY,
-  CAPABILITY_PROJECTS,
-  CAPABILITY_SKILL_DRAFTS,
-  CAPABILITY_TRACE_SPANS,
   CAPABILITY_SESSION_RENEW,
   CAPABILITY_SYNC_CONFLICTS,
-  LEGACY_WEB_SEARCH_MESSAGE,
+  CAPABILITY_TRACE_SPANS,
   CAPABILITY_WORKSPACE_MOVES,
   CAPABILITY_WORKSPACE_SYNC_NOW,
-  builtinToolDescriptor,
-  PI_PINNED_VERSION,
-  PI_PREVIOUS_MINORS,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
-  type ArtifactPutFrame,
-  type CommandResultFrame,
-  type ErrorInfo,
-  type FileShareFrame,
   type HelloFrame,
   type PiEventFrame,
-  type PolicyCheckFrame,
   type SandboxCloseReason,
   type SandboxErrorCode,
   type SandboxToServerFrame,
-  type FileEditProposeFrame,
-  type FileOpenFrame,
-  type WorkspaceConflictFrame,
-  type WorkspaceSyncedFrame,
-  type NotebookOutputFrame,
-  type NotebookRunFrame,
-  type SkillDraftSaveFrame,
-  type TraceSpansFrame,
-  type LegacyWebSearchQueryFrame,
   type ServerToSandboxFrame,
+  type WorkspaceConflictFrame,
 } from "@kobe/protocol";
-import { withTeam } from "@kobe/db";
-import { recordSpan, telemetryState } from "@kobe/telemetry";
-import { withAppendTx } from "../event-stream/append.js";
 import type WebSocket from "ws";
-import { completeCommand, orphanedDeliveries } from "./commands.js";
-import { UI_DEDUPE_MAX } from "./constants.js";
+import { AllowedArtifactCalls } from "../artifacts/allowed.js";
+import { RecalledItems } from "../memory/recalled.js";
+import {
+  DeniedEventBuckets,
+  FrameRate,
+  frameSizeOk,
+  MAX_BUFFERED_BYTES,
+} from "./connection-limits.js";
 import type { LeaseViolation, SandboxLimit, WireContext } from "./context.js";
 import { CommandDelivery, type IssuedCommand } from "./delivery.js";
-import { RunIngest } from "./ingest.js";
-import { wakeStartedAt } from "../sandbox-lifecycle/store.js";
-import { agentHelloSpan } from "../sandbox-lifecycle/timing.js";
-import { runLatency, type RunLatency } from "./run-latency-spans.js";
-import { AllowedArtifactCalls } from "../artifacts/allowed.js";
-import { putArtifact } from "../artifacts/put.js";
-import { shareFile } from "../files/share.js";
-import { onProjectCommit } from "./project-commit.js";
+import { helloRuns, reconcileOrphans, recordHelloTiming } from "./frames/hello.js";
+import { onPolicyCheck, type PolicyCheckPort } from "./frames/policy.js";
+import type { ConnectionPort } from "./frames/port.js";
 import {
-  putMemory,
-  readMemory,
-  showMemory,
-  type MemoryRefusal,
-  type MemoryReply,
-} from "../memory/agent.js";
-import { RecalledItems } from "../memory/recalled.js";
-import { decidePolicyCheck, denyFrame } from "./policy-check.js";
-import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
-import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
-import { onFileEditPropose } from "./file-edit-propose.js";
-import { onFileOpen } from "./file-open.js";
-import { ConflictRate, onWorkspaceConflict } from "./sync-conflict.js";
+  onBranchSummaryResult,
+  onCommandResult,
+  onCompactResult,
+  type CommandResultPort,
+} from "./frames/results.js";
+import { failOversizedRun, interruptRun } from "./frames/run-end.js";
+import { newRunIngest } from "./frames/ingest.js";
+import { onNotebookOutput } from "./frames/notebook-output.js";
+import { onUiRequest } from "./frames/ui-request.js";
+import { onLegacyWebSearch, WorkspaceSyncAsks } from "./frames/workspace-sync.js";
+import { toolFrameSpecs } from "./frames/tool-frames.js";
+import { onTraceSpans } from "./frames/trace-spans.js";
+import {
+  isToolFrame,
+  runToolFrame,
+  type ToolFrameGate,
+  type ToolFrameSpecs,
+} from "./gated-frame.js";
 import { NotebookIntake } from "./notebook-intake.js";
-import { onNotebookRun } from "./notebook-run.js";
-import { onSkillDraftSave } from "./skill-draft-save.js";
-import { createRunTranslator } from "./translate.js";
+import { admitPiVersion } from "./pi-version.js";
+import { LeaseBook } from "./leases.js";
+import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
+import type { RunIngest } from "./ingest.js";
+import { RunChecks } from "./run-checks.js";
+import { runLatency, type RunLatency } from "./run-latency-spans.js";
+import type { InterruptCause, LeasedRun } from "./run-state.js";
+import { SessionExpiry } from "./session-expiry.js";
+import { ConflictRate, onWorkspaceConflict } from "./sync-conflict.js";
 import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
-import type { CommandOutcome, SandboxTarget, SessionTokenVerifier } from "./types.js";
-import { RecentlyEndedRuns } from "./recently-ended.js";
+import type { SandboxTarget } from "./types.js";
+
+export { admitPiVersion, supportedPiVersion } from "./pi-version.js";
 
 export interface ConnectionClaims {
   readonly sandboxId: string;
@@ -88,75 +73,7 @@ export interface ConnectionClaims {
   readonly exp: number;
 }
 
-interface Lease {
-  readonly threadId: string;
-  readonly ingest: RunIngest;
-  ended: boolean;
-  /** A compaction run (KOBE-213): Pi's compact uses no tools, so no tool frame may name it. */
-  readonly compaction: boolean;
-}
-
 type State = "hello" | "starting" | "ready" | "closed";
-
-const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
-const POLICY_ANSWERED_MAX = 4_096;
-/** `workspace.sync_now` asks in flight per connection (KOBE-599); more are answered `unsynced`. */
-const MAX_SYNC_REQUESTS = 16;
-/** `{"v":1,"type":"<type>"` at the start of a frame (whitespace tolerated). */
-const FRAME_PREFIX = /^\s*\{\s*"v"\s*:\s*1\s*,\s*"type"\s*:\s*"([a-z._]{1,32})"/;
-/** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
-const ENDED_LEASES_MAX = 256;
-/** `session.renew` frames with an invalid token a connection may send before it is closed. */
-const INVALID_RENEWALS_MAX = 3;
-
-function remember(set: Set<string>, value: string, max: number): void {
-  set.add(value);
-  if (set.size > max) {
-    const oldest = set.values().next().value;
-    if (oldest !== undefined) set.delete(oldest);
-  }
-}
-
-/** The minor (`1.4`) of a `major.minor.patch` version, or undefined when it is not one. */
-function piMinor(version: string): string | undefined {
-  return /^(\d+\.\d+)\.\d+$/.exec(version)?.[1];
-}
-
-/**
- * The pinned Pi's minor (`1.4.x`), or a previous minor named in `previousMinors` while a Pi
- * upgrade is rolling out (PI_PREVIOUS_MINORS, empty since KOBE-518); the server refuses anything
- * else with `unsupported_version` (contract).
- */
-export function supportedPiVersion(
-  version: string,
-  previousMinors: readonly string[] = PI_PREVIOUS_MINORS,
-): boolean {
-  const minor = piMinor(version);
-  return minor !== undefined && (minor === pinnedPiMinor() || previousMinors.includes(minor));
-}
-
-const pinnedPiMinor = (): string => PI_PINNED_VERSION.split(".").slice(0, 2).join(".");
-
-/**
- * The hello's Pi gate: whether the version is supported, warning when it is supported only through
- * `previousMinors` (KOBE-511), so an upgrade's transition stays visible until the list is emptied
- * again (as KOBE-518 did for 1.0.x).
- */
-export function admitPiVersion(
-  version: string,
-  log: { warn(obj: Record<string, unknown>, msg: string): void },
-  sandboxId: string,
-  previousMinors: readonly string[] = PI_PREVIOUS_MINORS,
-): boolean {
-  if (!supportedPiVersion(version, previousMinors)) return false;
-  if (piMinor(version) !== pinnedPiMinor()) {
-    log.warn(
-      { sandbox_id: sandboxId, pi_version: version.slice(0, 32), pinned: PI_PINNED_VERSION },
-      "sandbox runs a previous Pi minor (accepted while the upgrade rolls out; remove it from PI_PREVIOUS_MINORS once no such sandbox remains)",
-    );
-  }
-  return true;
-}
 
 /**
  * One authenticated sandbox WebSocket (D13, `@kobe/protocol` sandbox-wire/connection.ts):
@@ -172,12 +89,9 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #ctx: WireContext;
   readonly #socket: WebSocket;
   readonly #registry: ConnectionRegistry;
-  readonly #leases = new Map<string, Lease>();
+  readonly #leases = new LeaseBook();
   /** `workspace.conflict` frames (KOBE-492): a few per minute per connection. */
   readonly #conflictRate = new ConflictRate();
-  /** Runs this sandbox held that ended without a live lease here (KOBE-483): late frames dropped. */
-  readonly #recentlyEnded = new RecentlyEndedRuns();
-  readonly #threads = new Set<string>();
   readonly #uiSeen = new Set<string>();
   readonly #policyPending = new Map<string, AbortController>();
   readonly #policyAnswered = new Set<string>();
@@ -185,36 +99,34 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #allowedArtifacts = new AllowedArtifactCalls();
   /** Projects with an agent commit waiting for approval on this connection. */
   readonly #pendingCommits = new Set<string>();
-  #artifactPuts = 0;
-  #fileShares = 0;
-  #memoryOps = 0;
-  readonly #skillDraftSaves = { count: 0 };
   /** Aborts pending project-memory approvals when the connection ends. */
   readonly #memoryAbort = new AbortController();
   /** Saved memories this connection's `recall` answers named, per run (KOBE-399). */
   readonly #recalled = new RecalledItems();
-  readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
+  readonly #deniedBuckets: DeniedEventBuckets;
   readonly #delivery: CommandDelivery;
+  /** Every tool frame kind's spec, run only through `#gate` (KOBE-706). */
+  readonly #toolFrames: ToolFrameSpecs;
+  readonly #gate: ToolFrameGate;
+  readonly #checks: RunChecks;
+  readonly #port: ConnectionPort;
+  readonly #policy: PolicyCheckPort;
   /** `notebook.output` frames of this connection's running executions (KOBE-464). */
   readonly #notebookOutputs: NotebookIntake;
   #state: State = "hello";
   #lastInbound = Date.now();
-  #tokens: number;
-  #byteTokens: number;
-  #tokensAt = Date.now();
+  readonly #rate: FrameRate;
   #timers: NodeJS.Timeout[] = [];
   #registered = false;
   /** `hello.capabilities` of the agent on this connection (none from older agents). */
   #capabilities: ReadonlySet<string> = new Set();
   /** `workspace.sync_now` asks sent here and not answered yet (KOBE-599). */
-  readonly #syncRequests = new Set<string>();
+  readonly #syncAsks: WorkspaceSyncAsks;
   /** Relayed sandbox spans (KOBE-274): the replica's run state; absent when it does not relay. */
   readonly #traces: TraceIntake | undefined;
   readonly #traceRate: TraceFrameRate | undefined;
   readonly #owner: RunOwner;
-  #tokenExpiresAt: number;
-  #expiryTimer: NodeJS.Timeout | undefined;
-  #invalidRenewals = 0;
+  readonly #expiry: SessionExpiry;
 
   constructor(
     ctx: WireContext,
@@ -231,9 +143,9 @@ export class SandboxConnection implements RegisteredConnection {
       ...(claims.evalThreadId === undefined ? {} : { evalThreadId: claims.evalThreadId }),
     };
     this.sandboxId = claims.sandboxId;
-    this.#tokenExpiresAt = claims.exp * 1000;
-    this.#tokens = ctx.tuning.frameBurst;
-    this.#byteTokens = ctx.tuning.byteBurst;
+    this.#expiry = this.#newExpiry(claims.exp * 1000);
+    this.#rate = new FrameRate(ctx.tuning);
+    this.#deniedBuckets = new DeniedEventBuckets(ctx.tuning);
     this.#delivery = new CommandDelivery(ctx, this);
     this.#notebookOutputs = new NotebookIntake({
       db: ctx.db,
@@ -249,6 +161,77 @@ export class SandboxConnection implements RegisteredConnection {
     this.#traceRate = this.#traces
       ? new TraceFrameRate(this.#traces.tuning, ctx.metrics)
       : undefined;
+    this.#port = this.#newPort();
+    this.#syncAsks = new WorkspaceSyncAsks(this.#port);
+    this.#checks = new RunChecks({
+      leases: this.#leases.runs,
+      threads: this.#leases.threads,
+      recentlyEnded: this.#leases.recentlyEnded,
+      metrics: ctx.metrics,
+      sandboxId: this.sandboxId,
+      log: this.log,
+      sendError: (code, message, ref) => this.sendError(code, message, ref),
+      violate: (violation, frameType) => this.#violate(violation, frameType),
+    });
+    this.#gate = this.#newGate();
+    this.#policy = this.#policyPort();
+    this.#toolFrames = this.#newToolFrames();
+  }
+
+  #newExpiry(expiresAtMs: number): SessionExpiry {
+    const host = {
+      verifyToken: this.#ctx.verifyToken,
+      sandboxId: this.sandboxId,
+      target: this.target,
+      graceMs: this.#ctx.tuning.tokenExpiryGraceMs,
+      log: this.log,
+      close: (reason: "unauthorized", message: string) => this.close(reason, message),
+      revalidate: () => this.revalidate(),
+    };
+    return new SessionExpiry(host, expiresAtMs);
+  }
+
+  /** The tool-frame gate over this connection's capabilities, leases and allowed calls. */
+  #newGate(): ToolFrameGate {
+    const tuning = this.#ctx.tuning;
+    return {
+      hasCapability: (name) => this.hasCapability(name),
+      checkToolRun: (runId, threadId, frameType) =>
+        this.#checks.toolRun(runId, threadId, frameType),
+      allowance: this.#allowedArtifacts,
+      get maxInFlight() {
+        return tuning.maxPendingArtifactPuts;
+      },
+    };
+  }
+
+  #newToolFrames(): ToolFrameSpecs {
+    return toolFrameSpecs({
+      port: this.#port,
+      inFlight: {
+        artifacts: { count: 0 },
+        fileShares: { count: 0 },
+        memory: { count: 0 },
+        skillDrafts: { count: 0 },
+      },
+      allowed: this.#allowedArtifacts,
+      recalled: this.#recalled,
+      pendingCommits: this.#pendingCommits,
+      signal: this.#memoryAbort.signal,
+      notebookExecute: (execute, timeoutMs) => this.#delivery.notebookExecute(execute, timeoutMs),
+    });
+  }
+
+  /** The narrow view frame handlers get (send, identity, logger, context). */
+  #newPort(): ConnectionPort {
+    return {
+      ctx: this.#ctx,
+      target: this.target,
+      sandboxId: this.sandboxId,
+      connectionId: this.id,
+      log: this.log,
+      send: (frame) => this.send(frame),
+    };
   }
 
   get ready(): boolean {
@@ -318,27 +301,7 @@ export class SandboxConnection implements RegisteredConnection {
    */
   workspaceSyncNow(requestId: string): void {
     const ready = this.#state === "ready" && this.hasCapability(CAPABILITY_WORKSPACE_SYNC_NOW);
-    if (!ready || this.#syncRequests.size >= MAX_SYNC_REQUESTS) {
-      this.#syncAnswered(requestId, false);
-      return;
-    }
-    this.#syncRequests.add(requestId);
-    if (!this.send({ v: 1, type: "workspace.sync_now", request_id: requestId })) {
-      this.#syncRequests.delete(requestId);
-      this.#syncAnswered(requestId, false);
-    }
-  }
-
-  /** Only answers to asks sent on this connection are passed on; anything else is dropped. */
-  #onWorkspaceSynced(frame: WorkspaceSyncedFrame): void {
-    if (!this.#syncRequests.delete(frame.request_id)) return;
-    this.#syncAnswered(frame.request_id, frame.ok);
-  }
-
-  #syncAnswered(requestId: string, ok: boolean): void {
-    this.#ctx.bus
-      .notify(this.#ctx.db, { kind: ok ? "synced" : "unsynced", id: requestId })
-      .catch((err: unknown) => this.log.warn({ err }, "could not pass on a workspace sync answer"));
+    this.#syncAsks.ask(requestId, ready);
   }
 
   workspaceMoved(): void {
@@ -353,18 +316,15 @@ export class SandboxConnection implements RegisteredConnection {
   // ------------------------------------------------------------------ leases (used by delivery)
 
   hasLiveLease(runId: string): boolean {
-    const lease = this.#leases.get(runId);
-    return lease !== undefined && !lease.ended;
+    return this.#leases.isLive(runId);
   }
 
   hasLease(runId: string): boolean {
-    return this.#leases.has(runId);
+    return this.#leases.runs.has(runId);
   }
 
   liveMessageRuns(threadId: string): readonly string[] {
-    return [...this.#leases]
-      .filter(([, l]) => l.threadId === threadId && !l.ended && !l.compaction)
-      .map(([runId]) => runId);
+    return this.#leases.liveMessageRuns(threadId);
   }
 
   hasCapability(name: string): boolean {
@@ -372,7 +332,7 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   leaseThread(threadId: string): void {
-    this.#threads.add(threadId);
+    this.#leases.threads.add(threadId);
   }
 
   /** A run.start is about to be delivered here: the run (and its thread) are leased to us. */
@@ -383,11 +343,9 @@ export class SandboxConnection implements RegisteredConnection {
     compaction = false,
     startedAt: Date | null = null,
   ): void {
-    const existing = this.#leases.get(runId);
-    if (existing && !existing.ended) return;
-    this.#threads.add(threadId);
+    if (this.#leases.isLive(runId)) return;
     this.#traces?.track(runId, threadId, startedAt, this.#owner);
-    this.#leases.set(runId, {
+    this.#leases.add(runId, {
       threadId,
       ended: false,
       compaction,
@@ -402,93 +360,32 @@ export class SandboxConnection implements RegisteredConnection {
 
   /** The run ended (here or elsewhere): late frames get `run_not_active`. */
   endLease(runId: string): void {
-    const lease = this.#leases.get(runId);
+    const lease = this.#leases.end(runId);
     if (!lease) return;
-    lease.ended = true;
-    this.#recentlyEnded.add(runId, lease.threadId);
     this.#traces?.ended(runId);
     lease.ingest.close();
-    this.#deniedBuckets.delete(runId);
-    const ended = [...this.#leases].filter(([, l]) => l.ended);
-    for (const [id] of ended.slice(0, Math.max(0, ended.length - ENDED_LEASES_MAX))) {
-      this.#leases.delete(id);
-    }
+    this.#deniedBuckets.forget(runId);
+    this.#leases.prune();
   }
 
   #newIngest(runId: string, threadId: string, cursor: number, latency: RunLatency): RunIngest {
-    const ctx = this.#ctx;
-    return new RunIngest({
-      db: ctx.db,
-      teamId: this.target.teamId,
+    return newRunIngest(
+      {
+        port: this.#port,
+        delivery: this.#delivery,
+        sendError: (code, message, ref) => this.sendError(code, message, ref),
+        endLease: (run) => this.endLease(run),
+        close: (reason, message) => this.close(reason, message),
+        limitExceeded: (run, thread, limit) => void this.#limitExceeded(run, thread, limit),
+      },
       runId,
       threadId,
       cursor,
-      onFrame: (events, nowMs) => latency.observe(events, nowMs),
-      tuning: ctx.tuning,
-      serverCalls: ctx.serverCalls,
-      createTranslator: () =>
-        createRunTranslator({
-          teamId: this.target.teamId,
-          registry: ctx.tools,
-          onDropped: (dropped) => {
-            ctx.metrics.eventsDropped += 1;
-            this.log.warn({ run_id: runId, ...dropped }, "dropped a translated event");
-          },
-        }),
-      host: {
-        metrics: ctx.metrics,
-        log: this.log,
-        sendAck: (run, seq) => this.send({ v: 1, type: "ack", run_id: run, seq }),
-        sendResend: (run, from) => this.send({ v: 1, type: "resend", run_id: run, from_seq: from }),
-        sendError: (code, message, ref) => this.sendError(code, message, ref),
-        fetchNewEntries: (thread) => this.#delivery.fetchNewEntries(thread),
-        runEnded: (run, status) => {
-          this.endLease(run);
-          if (status === undefined) return;
-          if (status === "completed") ctx.metrics.runsCompleted += 1;
-          ctx.runEnded({ teamId: this.target.teamId, runId: run, threadId, status });
-        },
-        failed: () => this.close("internal", "events could not be stored"),
-        needsSync: (thread) => this.#delivery.forgetSession(thread),
-        limitExceeded: (run, limit) => void this.#limitExceeded(run, threadId, limit),
-      },
-    });
+      latency,
+    );
   }
 
   // ------------------------------------------------------------------ inbound
-
-  /** Frame and byte token buckets, charged before anything is decoded. */
-  #rateOk(bytes: number): SandboxLimit | undefined {
-    const { frameRatePerSec, frameBurst, byteRatePerSec, byteBurst } = this.#ctx.tuning;
-    const now = Date.now();
-    const elapsed = (now - this.#tokensAt) / 1000;
-    this.#tokensAt = now;
-    this.#tokens = Math.min(frameBurst, this.#tokens + elapsed * frameRatePerSec);
-    this.#byteTokens = Math.min(byteBurst, this.#byteTokens + elapsed * byteRatePerSec);
-    if (this.#tokens < 1) return "frame_rate";
-    if (this.#byteTokens < bytes) return "byte_rate";
-    this.#tokens -= 1;
-    this.#byteTokens -= bytes;
-    return undefined;
-  }
-
-  /**
-   * Size cap by frame type, read from the raw prefix (KOBE-23 writes `{"v":1,"type":…` first):
-   * only `pi.event` / `command.result` may use the full 4 MiB, `policy.check` a smaller cap, and
-   * any other or unreadable type must be small — so a hostile frame is refused before parsing.
-   */
-  #sizeOk(raw: Buffer): boolean {
-    const max = this.#ctx.tuning.frameMaxBytes;
-    if (raw.length <= max.small) return true;
-    if (this.#state !== "ready") return false;
-    const type = FRAME_PREFIX.exec(raw.subarray(0, 64).toString("latin1"))?.[1];
-    if (type === "pi.event" || type === "command.result") return raw.length <= max.bulk;
-    if (type === "policy.check") return raw.length <= max.policyCheck;
-    if (type === "artifact.put") return raw.length <= max.artifactPut;
-    if (type === "thread.compact_result") return raw.length <= max.compactResult;
-    if (type === "notebook.run") return raw.length <= max.notebookRun;
-    return false;
-  }
 
   #overLimit(limit: SandboxLimit, message: string): void {
     this.#ctx.auditLimit(this.target, this.sandboxId, limit);
@@ -504,7 +401,7 @@ export class SandboxConnection implements RegisteredConnection {
       : Array.isArray(data)
         ? Buffer.concat(data)
         : Buffer.from(data);
-    const limit = this.#rateOk(raw.length);
+    const limit = this.#rate.charge(raw.length);
     if (limit) {
       this.#overLimit(limit, limit === "byte_rate" ? "byte rate exceeded" : "frame rate exceeded");
       return;
@@ -514,7 +411,7 @@ export class SandboxConnection implements RegisteredConnection {
       this.sendError("malformed_frame", "binary frames are not part of the protocol");
       return;
     }
-    if (!this.#sizeOk(raw)) {
+    if (!frameSizeOk(raw, this.#state === "ready", this.#ctx.tuning.frameMaxBytes)) {
       this.#overLimit("frame_size", "frame too large for its type");
       return;
     }
@@ -551,72 +448,80 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   #dispatch(frame: SandboxToServerFrame, bytes: number): void {
+    // Tool frames run only through the gate (KOBE-706); the switch below cannot name one.
+    if (isToolFrame(frame, this.#toolFrames)) {
+      runToolFrame(this.#gate, this.#toolFrames, frame);
+      return;
+    }
     switch (frame.type) {
       case "pi.event":
         this.#onPiEvent(frame, bytes);
         return;
       case "policy.check":
-        this.#onPolicyCheck(frame);
-        return;
-      case "artifact.put":
-        this.#onArtifactPut(frame);
-        return;
-      case "file.share":
-        this.#onFileShare(frame);
-        return;
-      case "project.commit":
-        this.#onProjectCommit(frame);
-        return;
-      case "skill.draft_save":
-        this.#onSkillDraftSave(frame);
-        return;
-      case "file.edit_propose":
-        this.#onFileEditPropose(frame);
-        return;
-      case "file.open":
-        this.#onFileOpen(frame);
+        onPolicyCheck(this.#policy, frame);
         return;
       case "workspace.conflict":
         this.#onWorkspaceConflict(frame);
         return;
       case "workspace.synced":
-        this.#onWorkspaceSynced(frame);
+        this.#syncAsks.synced(frame.request_id, frame.ok);
         return;
       case "notebook.output":
-        this.#onNotebookOutput(frame, bytes);
-        return;
-      case "notebook.run":
-        this.#onNotebookRun(frame);
-        return;
-      case "memory.put":
-        this.#onMemoryPut(frame);
-        return;
-      case "memory.read":
-        this.#onMemoryRead(frame);
-        return;
-      case "memory.show":
-        this.#onMemoryShow(frame);
+        onNotebookOutput(
+          {
+            delivery: this.#delivery,
+            intake: this.#notebookOutputs,
+            metrics: this.#ctx.metrics,
+            violate: (violation, frameType) => this.#violate(violation, frameType),
+          },
+          frame,
+          bytes,
+        );
         return;
       case "web_search.query":
-        this.#onLegacyWebSearch(frame);
+        onLegacyWebSearch(this.#port, frame);
         return;
       case "trace.spans":
-        this.#onTraceSpans(frame);
+        onTraceSpans(
+          {
+            traces: this.#traces,
+            rate: this.#traceRate,
+            announced: this.#capabilities.has(CAPABILITY_TRACE_SPANS),
+            metrics: this.#ctx.metrics,
+            owner: this.#owner,
+            leaseThread: (runId) => this.#leases.runs.get(runId)?.threadId,
+            violate: (violation, frameType) => this.#violate(violation, frameType),
+          },
+          frame,
+        );
         return;
       case "session.renew":
-        this.#onSessionRenew(frame.token);
+        this.#expiry.renew(frame.token, this.#capabilities.has(CAPABILITY_SESSION_RENEW));
         return;
       case "command.result":
-        this.#onCommandResult(frame);
+        onCommandResult(this.#results(), frame);
         return;
       case "thread.compact_result":
-        this.#onCompactResult(frame);
+        onCompactResult(this.#results(), frame);
         return;
       case "thread.branch_summary_result":
-        this.#onBranchSummaryResult(frame);
+        onBranchSummaryResult(this.#results(), frame);
         return;
       case "pi.ui_request":
-        this.#onUiRequest(frame);
+        onUiRequest(
+          {
+            ui: this.#ctx.ui,
+            target: this.target,
+            seen: this.#uiSeen,
+            log: this.#port.log,
+            leased: (f) =>
+              f.run_id === undefined
+                ? this.#checks.thread(f.thread_id, "pi.ui_request")
+                : this.#checks.run(f.run_id, f.thread_id, "pi.ui_request") === "ok",
+            send: (out) => this.send(out),
+          },
+          frame,
+        );
         return;
       case "pi.exited":
         this.#onPiExited(frame.thread_id, frame.exit_code, frame.signal);
@@ -627,64 +532,6 @@ export class SandboxConnection implements RegisteredConnection {
       default:
         return;
     }
-  }
-
-  /** ok | ended (late frame of a run of this connection) | violation (already handled). */
-  /**
-   * `#checkRun` for frames a tool sends (policy checks, artifacts, files, memory, proposals, web
-   * search): a compaction run (KOBE-213) makes no tool calls, so one naming it fails closed, as if
-   * the run had ended, and is logged as a security event.
-   */
-  #checkToolRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
-    const check = this.#checkRun(runId, threadId, frameType);
-    if (check !== "ok" || this.#leases.get(runId)?.compaction !== true) return check;
-    this.log.warn(
-      { run_id: runId, frame_type: frameType, sandbox_id: this.sandboxId, security: true },
-      "tool frame for a compaction run refused",
-    );
-    this.sendError("run_not_active", "a compaction run makes no tool calls", frameType);
-    return "ended";
-  }
-
-  #checkRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
-    const lease = this.#leases.get(runId);
-    if (!lease) return this.#checkRecentlyEnded(runId, threadId, frameType);
-    if (lease.threadId !== threadId) {
-      this.#violate("unknown_thread", frameType);
-      return "violation";
-    }
-    if (lease.ended) {
-      this.#ctx.metrics.lateFrames += 1;
-      this.sendError("run_not_active", "the run has ended", frameType);
-      return "ended";
-    }
-    return "ok";
-  }
-
-  /**
-   * No lease here: a run this sandbox held that just ended (interrupted by this connection's hello,
-   * or an ended lease the count cap evicted) gets its late frame dropped within the grace window
-   * (KOBE-483); anything else is a lease violation and closes the connection.
-   */
-  #checkRecentlyEnded(runId: string, threadId: string, frameType: string): "ended" | "violation" {
-    const recent = this.#recentlyEnded.match(runId, threadId);
-    if (recent === "match") {
-      this.#ctx.metrics.lateFrames += 1;
-      this.log.debug(
-        { run_id: runId, frame_type: frameType },
-        "late frame of an ended run dropped",
-      );
-      this.sendError("run_not_active", "the run has ended", frameType);
-      return "ended";
-    }
-    this.#violate(recent === "thread_mismatch" ? "unknown_thread" : "unknown_run", frameType);
-    return "violation";
-  }
-
-  #checkThread(threadId: string, frameType: string): boolean {
-    if (this.#threads.has(threadId)) return true;
-    this.#violate("unknown_thread", frameType);
-    return false;
   }
 
   violate(violation: LeaseViolation, frameType: string): void {
@@ -705,338 +552,32 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   #onPiEvent(frame: PiEventFrame, bytes: number): void {
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "pi.event");
+    const check = this.#checks.run(frame.run_id, frame.thread_id, "pi.event");
     if (check === "violation") return;
     if (check === "ended") {
       // Not executed; acknowledged so the agent can forget the run (benign race after Stop).
       this.send({ v: 1, type: "ack", run_id: frame.run_id, seq: frame.seq });
       return;
     }
-    this.#leases.get(frame.run_id)?.ingest.push(frame, bytes);
+    this.#leases.runs.get(frame.run_id)?.ingest.push(frame, bytes);
   }
 
-  /**
-   * `trace.spans` (KOBE-274): never answered, never closing the connection, except for a run or
-   * thread this connection never held (a lease violation like any other frame's). Classified by
-   * the decoded type (key order cannot skip the rate); the spans are parsed later, one by one.
-   */
-  #onTraceSpans(frame: TraceSpansFrame): void {
-    const traces = this.#traces;
-    if (
-      traces === undefined ||
-      this.#traceRate === undefined ||
-      !this.#capabilities.has(CAPABILITY_TRACE_SPANS)
-    ) {
-      this.#ctx.metrics.traceFramesDropped += 1;
-      return;
-    }
-    if (!this.#traceRate.admit()) return;
-    const lease = this.#leases.get(frame.run_id);
-    if (lease === undefined) {
-      // Note: a late frame for a run whose lease the ended-lease count cap evicted AND whose 30 s
-      // trace grace passed is a violation; that needs 256 ended runs on one connection meanwhile.
-      if (traces.recentlyEnded(frame.run_id, frame.thread_id, this.#owner)) {
-        traces.dropFrame(frame.run_id, frame.spans.length);
-      } else {
-        this.#violate("unknown_run", "trace.spans");
-      }
-      return;
-    }
-    if (lease.threadId !== frame.thread_id) {
-      this.#violate("unknown_thread", "trace.spans");
-      return;
-    }
-    traces.accept(frame, this.#owner);
-  }
-
-  #onPolicyCheck(frame: PolicyCheckFrame): void {
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "policy.check");
-    if (check === "violation") return;
-    if (check === "ended") {
-      this.send(
-        denyFrame(frame, [], "The run has ended, so the tool call was denied.", "run_not_active"),
-      );
-      return;
-    }
-    if (this.#policyPending.size >= this.#ctx.tuning.maxPendingPolicyChecks) {
-      this.send(denyFrame(frame, [], "Too many tool calls are waiting for a decision. Try again."));
-      return;
-    }
-    const key = `${frame.run_id}:${frame.request_id}`;
-    // One answer per request id, also after it was answered (a replay must not ask twice).
-    if (this.#policyPending.has(key) || this.#policyAnswered.has(key)) return;
-    const abort = new AbortController();
-    this.#policyPending.set(key, abort);
-    this.#ctx.metrics.policyChecks += 1;
-    let deferred = false;
-    void decidePolicyCheck(
-      this.#ctx.policy,
-      {
-        ...this.target,
-        connectionId: this.id,
-        fileEdits: this.hasCapability(CAPABILITY_FILE_EDITS),
-      },
-      frame,
-      abort.signal,
-      (pending) =>
-        this.send({
-          v: 1,
-          type: "policy.pending",
-          request_id: frame.request_id,
-          run_id: frame.run_id,
-          tool_call_id: frame.tool_call_id,
-          approval_id: pending.approvalId,
-          expires_at: pending.expiresAt,
-        }),
-      () => this.#takeDeniedToken(frame.run_id),
-      () => {
-        deferred = true;
-      },
-    ).then((result) => {
-      this.#policyPending.delete(key);
-      remember(this.#policyAnswered, key, POLICY_ANSWERED_MAX);
-      // Tool spans get their name from this decision, never from the sandbox (KOBE-274): a denied
-      // call's name is model text unless it names a built-in.
-      const known = result.decision === "allow" || builtinToolDescriptor(frame.tool) !== undefined;
-      this.#traces?.noteToolCall(frame.run_id, frame.tool_call_id, known ? frame.tool : undefined);
-      // A run that ended while we decided gets a deny, whatever the decision was.
-      const lease = this.#leases.get(frame.run_id);
-      if (result.decision === "allow" && lease && !lease.ended) {
-        // D-3: the artifact input the server allowed, by hash, before the call reaches the sandbox.
-        // KOBE-579: "a rule allowed it outright" is a positive mark on the allowance; a deferred
-        // approval (or no entry at all) means the frame handler must ask (fail closed).
-        this.#allowedArtifacts.record(frame.run_id, frame.tool_call_id, frame.tool, frame.input, {
-          ruleAllowed: !deferred,
-        });
-      }
-      this.send(
-        lease?.ended && result.decision === "allow"
-          ? denyFrame(
-              frame,
-              [],
-              "The run has ended, so the tool call was denied.",
-              "run_not_active",
-            )
-          : result,
-      );
-    });
-  }
-
-  /**
-   * `artifact.put` (KOBE-129, D-3 of KOBE-55). Accepted only if this connection announced the
-   * capability, the run is leased here and active, and this tool call was allowed here for this
-   * tool with the same canonical input hash; the rest (same team and thread, idempotency) is in
-   * `putArtifact`. Every refusal is audited (no content) and answered with `artifact.result`.
-   */
-  #onArtifactPut(frame: ArtifactPutFrame): void {
-    const refuse = (
-      reason: Parameters<WireContext["auditArtifactRefused"]>[2]["reason"],
-      code: "not_allowed" | "not_found",
-      message: string,
-    ) => {
-      this.#ctx.auditArtifactRefused(this.target, this.sandboxId, {
-        reason,
-        tool: frame.tool,
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-      this.send({
-        v: 1,
-        type: "artifact.result",
-        request_id: frame.request_id,
-        ok: false,
-        error: { code, message },
-      });
+  /** What `frames/policy.ts` gets for `policy.check` frames. */
+  #policyPort(): PolicyCheckPort {
+    return {
+      ctx: this.#ctx,
+      target: this.target,
+      connectionId: this.id,
+      pending: this.#policyPending,
+      answered: this.#policyAnswered,
+      allowed: this.#allowedArtifacts,
+      traces: this.#traces,
+      hasCapability: (name) => this.hasCapability(name),
+      checkToolRun: (runId, threadId, type) => this.#checks.toolRun(runId, threadId, type),
+      leaseEnded: (runId) => this.#leases.runs.get(runId)?.ended,
+      takeDeniedToken: (runId) => this.#deniedBuckets.take(runId),
+      send: (frame) => this.send(frame),
     };
-    if (!this.hasCapability(CAPABILITY_ARTIFACTS)) {
-      refuse(
-        "capability_missing",
-        "not_allowed",
-        "This sandbox did not announce artifact support.",
-      );
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "artifact.put");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "not_allowed", "The run has ended, so the artifact was not stored.");
-      return;
-    }
-    const verdict = this.#allowedArtifacts.check(
-      frame.run_id,
-      frame.tool_call_id,
-      frame.tool,
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict,
-        "not_allowed",
-        verdict === "input_mismatch"
-          ? "The artifact differs from the call that was allowed."
-          : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#artifactPuts >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      this.send({
-        v: 1,
-        type: "artifact.result",
-        request_id: frame.request_id,
-        ok: false,
-        error: {
-          code: "storage_failed",
-          message: "Too many artifacts are being stored. Try again.",
-        },
-      });
-      return;
-    }
-    this.#artifactPuts += 1;
-    void putArtifact(this.#ctx.artifacts, this.target, frame)
-      .catch((err: unknown) => {
-        this.log.error({ err }, "artifact.put failed");
-        return {
-          ok: false,
-          code: "storage_failed",
-          message: "The artifact could not be stored. Try again.",
-        } as const;
-      })
-      .then((result) => {
-        this.#artifactPuts -= 1;
-        if (result.ok) {
-          this.send({
-            v: 1,
-            type: "artifact.result",
-            request_id: frame.request_id,
-            ok: true,
-            artifact_id: result.artifactId,
-            version: result.version,
-          });
-          return;
-        }
-        if ("refusal" in result && result.refusal) {
-          this.#ctx.auditArtifactRefused(this.target, this.sandboxId, {
-            reason: result.refusal,
-            tool: frame.tool,
-            runId: frame.run_id,
-            toolCallId: frame.tool_call_id,
-          });
-        }
-        this.send({
-          v: 1,
-          type: "artifact.result",
-          request_id: frame.request_id,
-          ok: false,
-          error: { code: result.code, message: result.message },
-        });
-      });
-  }
-
-  /**
-   * `file.share` (KOBE-150). Accepted only if this connection announced `files`, the run is
-   * leased here and active, and this `share_file` call was allowed here with the same canonical
-   * input hash (D-3). The manifest check, copy, quota, row and event are in `shareFile`. Every
-   * refusal is audited (no names or content) and answered with `file.share_result`.
-   */
-  #onFileShare(frame: FileShareFrame): void {
-    const answer = (result: Parameters<SandboxConnection["send"]>[0]) => this.send(result);
-    const fail = (code: string, message: string) =>
-      answer({
-        v: 1,
-        type: "file.share_result",
-        request_id: frame.request_id,
-        ok: false,
-        error: { code, message },
-      });
-    const refuse = (
-      reason: Parameters<WireContext["auditFileShareRefused"]>[2]["reason"],
-      message: string,
-    ) => {
-      this.#ctx.auditFileShareRefused(this.target, this.sandboxId, {
-        reason,
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-      fail("not_allowed", message);
-    };
-    if (!this.hasCapability(CAPABILITY_FILES)) {
-      refuse("capability_missing", "This sandbox did not announce file sharing.");
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "file.share");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "The run has ended, so the file was not shared.");
-      return;
-    }
-    const verdict = this.#allowedArtifacts.check(
-      frame.run_id,
-      frame.tool_call_id,
-      frame.tool,
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict,
-        verdict === "input_mismatch"
-          ? "The file differs from the call that was allowed."
-          : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#fileShares >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      fail("storage_failed", "Too many files are being shared. Try again.");
-      return;
-    }
-    this.#fileShares += 1;
-    void shareFile(this.#ctx.fileShare, this.target, frame)
-      .catch((err: unknown) => {
-        this.log.error({ err }, "file.share failed");
-        return {
-          ok: false,
-          code: "storage_failed",
-          message: "The file could not be shared. Try again.",
-        } as const;
-      })
-      .then((result) => {
-        this.#fileShares -= 1;
-        if (result.ok) {
-          answer({
-            v: 1,
-            type: "file.share_result",
-            request_id: frame.request_id,
-            ok: true,
-            ...result.file,
-          });
-          return;
-        }
-        if ("refusal" in result && result.refusal) {
-          this.#ctx.auditFileShareRefused(this.target, this.sandboxId, {
-            reason: result.refusal,
-            runId: frame.run_id,
-            toolCallId: frame.tool_call_id,
-          });
-        }
-        fail(result.code, result.message);
-      });
-  }
-
-  /** `file.edit_propose` (KOBE-462): checks and record in `file-edit-propose.ts`. */
-  #onFileEditPropose(frame: FileEditProposeFrame): void {
-    onFileEditPropose(
-      {
-        db: this.#ctx.db,
-        target: this.target,
-        runMaxEvents: this.#ctx.tuning.runMaxEvents,
-        log: this.log,
-        hasCapability: this.hasCapability(CAPABILITY_FILE_EDITS),
-        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "file.edit_propose"),
-        verdict: () =>
-          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
-        send: (out) => this.send(out),
-      },
-      frame,
-    );
   }
 
   /** `workspace.conflict` (KOBE-492): checks and record in `sync-conflict.ts`. */
@@ -1048,489 +589,31 @@ export class SandboxConnection implements RegisteredConnection {
         log: this.log,
         hasCapability: this.hasCapability(CAPABILITY_SYNC_CONFLICTS),
         rate: this.#conflictRate,
-        activeRun: (threadId) => {
-          for (const [runId, lease] of this.#leases) {
-            if (lease.threadId === threadId && !lease.ended && !lease.compaction) return runId;
-          }
-          return undefined;
-        },
+        activeRun: (threadId) => this.#leases.liveMessageRuns(threadId)[0],
         send: (out) => this.send(out),
       },
       frame,
     );
   }
 
-  /** `file.open` (KOBE-484): checks and record in `file-open.ts`; rides `file_edits`. */
-  #onFileOpen(frame: FileOpenFrame): void {
-    onFileOpen(
-      {
-        db: this.#ctx.db,
-        target: this.target,
-        runMaxEvents: this.#ctx.tuning.runMaxEvents,
-        log: this.log,
-        hasCapability: this.hasCapability(CAPABILITY_FILE_EDITS),
-        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "file.open"),
-        verdict: () =>
-          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
-        send: (out) => this.send(out),
-      },
-      frame,
-    );
-  }
-
-  /**
-   * `notebook.output` (KOBE-464, NB14): only for a `notebook.execute` this connection delivered and
-   * has not had answered, for the same thread; the run and exec ids come from that command. Late
-   * outputs of an answered command are dropped; anything else is a lease violation.
-   */
-  #onNotebookOutput(frame: NotebookOutputFrame, bytes: number): void {
-    const issued = this.#delivery.peekIssued(frame.command_id);
-    if (issued === "answered") {
-      this.#ctx.metrics.notebookOutputsDropped += 1;
-      return;
-    }
-    const exec = issued?.notebook;
-    if (exec === undefined || exec.threadId !== frame.thread_id) {
-      this.#violate("unknown_command", "notebook.output");
-      return;
-    }
-    this.#notebookOutputs.accept(frame.command_id, exec, frame, bytes);
-  }
-
-  /** `notebook.run` (KOBE-464, `run_python`): checks and execution in `notebook-run.ts`. */
-  #onNotebookRun(frame: NotebookRunFrame): void {
-    onNotebookRun(
-      {
-        db: this.#ctx.db,
-        target: this.target,
-        files: this.#ctx.notebooks,
-        log: this.log,
-        hasCapability: this.hasCapability(CAPABILITY_NOTEBOOKS),
-        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "notebook.run"),
-        verdict: () =>
-          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
-        execute: (execute, timeoutMs) => this.#delivery.notebookExecute(execute, timeoutMs),
-        send: (out) => this.send(out),
-      },
-      frame,
-    );
-  }
-
-  /** `skill.draft_save` (KOBE-442): checks and save in `skill-draft-save.ts`. */
-  #onSkillDraftSave(frame: SkillDraftSaveFrame): void {
-    onSkillDraftSave(
-      {
-        ctx: this.#ctx,
-        target: this.target,
-        sandboxId: this.sandboxId,
-        log: this.log,
-        hasCapability: this.hasCapability(CAPABILITY_SKILL_DRAFTS),
-        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "skill.draft_save"),
-        verdict: () =>
-          // Single use (review M1): one allowed call, or one approval, is one save.
-          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
-        inFlight: this.#skillDraftSaves,
-        send: (out) => this.send(out),
-      },
-      frame,
-    );
-  }
-
-  /**
-   * `web_search.query` from an agent built before KOBE-606 removed the built-in web search. The
-   * server no longer knows `web_search` (policy denies it as an unknown tool), so this only comes
-   * from an old agent mid-rollout or a confused one: answer unavailable and keep the connection.
-   */
-  #onLegacyWebSearch(frame: LegacyWebSearchQueryFrame): void {
-    this.log.debug({ run_id: frame.run_id }, "legacy web_search.query answered unavailable");
-    this.send({
-      v: 1,
-      type: "web_search.result",
-      request_id: frame.request_id,
-      ok: true,
-      available: false,
-      reason: "not_configured",
-      message: LEGACY_WEB_SEARCH_MESSAGE,
-    });
-  }
-
-  /**
-   * `memory.put` (KOBE-156). Accepted only if this connection announced `memory`, the run is
-   * leased here and active, and this `remember` call was allowed here with the same canonical
-   * input hash (D-3). Scope switches, project membership, the approval of a project write and the
-   * store are in `putMemory`. Every refusal is audited (reason only) and answered `memory.result`.
-   */
-  #onMemoryPut(frame: Extract<SandboxToServerFrame, { type: "memory.put" }>): void {
-    const answer = (reply: MemoryReply) =>
-      this.send({ v: 1, type: "memory.result", request_id: frame.request_id, ...reply });
-    const audit = (
-      reason: MemoryRefusal | "capability_missing" | "input_mismatch",
-      scope?: "user" | "project",
-    ) =>
-      this.#ctx.auditMemoryRefused(this.target, this.sandboxId, {
-        op: "put",
-        reason,
-        scope: scope ?? frame.input.scope,
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-    const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
-      audit(reason);
-      answer({ ok: false, error: { code: "not_allowed", message } });
+  /** What the command-result handlers (`frames/results.ts`) get. */
+  #results(): CommandResultPort {
+    return {
+      delivery: this.#delivery,
+      notebookOutputs: this.#notebookOutputs,
+      violate: (violation, frameType) => this.#violate(violation, frameType),
     };
-    if (!this.hasCapability(CAPABILITY_MEMORY)) {
-      refuse("capability_missing", "This sandbox did not announce memory.");
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.put");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "The run has ended, so nothing was remembered.");
-      return;
-    }
-    const verdict = this.#allowedArtifacts.check(
-      frame.run_id,
-      frame.tool_call_id,
-      "remember",
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
-        verdict === "input_mismatch"
-          ? "The memory differs from the call that was allowed."
-          : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#memoryOps >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      answer({
-        ok: false,
-        error: {
-          code: "storage_failed",
-          message: "Too many memory writes are waiting. Try again.",
-        },
-      });
-      return;
-    }
-    this.#memoryOps += 1;
-    const outcome = putMemory(this.#ctx.memory, {
-      teamId: this.target.teamId,
-      userId: this.target.userId,
-      runId: frame.run_id,
-      threadId: frame.thread_id,
-      connectionId: this.id,
-      toolCallId: frame.tool_call_id,
-      input: frame.input,
-      signal: this.#memoryAbort.signal,
-      refused: audit,
-    });
-    // The slot frees once the sandbox is answered; a project write waiting for approval after its
-    // `pending_approval` answer is bounded by the approvals per run (broker), not by this counter.
-    void outcome.reply.then(answer).finally(() => {
-      this.#memoryOps -= 1;
-    });
-  }
-
-  /** `project.commit` (KOBE-579): checks, approval and commit in `project-commit.ts`. */
-  #onProjectCommit(frame: Extract<SandboxToServerFrame, { type: "project.commit" }>): void {
-    void onProjectCommit(
-      {
-        deps: this.#ctx.projectCommits,
-        target: this.target,
-        connectionId: this.id,
-        hasCapability: this.hasCapability(CAPABILITY_PROJECTS),
-        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "project.commit"),
-        verdict: () =>
-          this.#allowedArtifacts.check(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
-        ruleAllowed: () => this.#allowedArtifacts.ruleAllowed(frame.run_id, frame.tool_call_id),
-        pending: this.#pendingCommits,
-        signal: this.#memoryAbort.signal,
-        send: (out) => this.send(out),
-      },
-      frame,
-    );
-  }
-
-  /** `memory.read` (KOBE-156): a read, so no allowed-call binding; same capability and lease rules. */
-  #onMemoryRead(frame: Extract<SandboxToServerFrame, { type: "memory.read" }>): void {
-    const answer = (reply: MemoryReply) =>
-      this.send({ v: 1, type: "memory.result", request_id: frame.request_id, ...reply });
-    const audit = (
-      reason: MemoryRefusal | "capability_missing" | "input_mismatch",
-      scope?: "user" | "project",
-    ) =>
-      this.#ctx.auditMemoryRefused(this.target, this.sandboxId, {
-        op: "read",
-        reason,
-        ...(scope ? { scope } : {}),
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-    const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
-      audit(reason);
-      answer({ ok: false, error: { code: "not_allowed", message } });
-    };
-    if (!this.hasCapability(CAPABILITY_MEMORY)) {
-      refuse("capability_missing", "This sandbox did not announce memory.");
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.read");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "The run has ended.");
-      return;
-    }
-    // D-3: the server decides every tool call; a recall that policy did not allow (deny rule, the
-    // agent's tool list, approval mode) is not served, whatever the sandbox sends.
-    const verdict = this.#allowedArtifacts.check(
-      frame.run_id,
-      frame.tool_call_id,
-      "recall",
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
-        verdict === "input_mismatch"
-          ? "The recall differs from the call that was allowed."
-          : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#memoryOps >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      answer({
-        ok: false,
-        error: {
-          code: "storage_failed",
-          message: "Too many memory requests are waiting. Try again.",
-        },
-      });
-      return;
-    }
-    this.#memoryOps += 1;
-    void readMemory(this.#ctx.memory, {
-      teamId: this.target.teamId,
-      userId: this.target.userId,
-      runId: frame.run_id,
-      threadId: frame.thread_id,
-      input: frame.input,
-      refused: audit,
-    })
-      .then((reply) => {
-        // KOBE-399: what this recall named may be shown with `show_memory_item` in this run.
-        if (reply.ok && reply.op === "read" && reply.items !== undefined)
-          this.#recalled.add(frame.run_id, reply.items);
-        answer(reply);
-      })
-      .finally(() => {
-        this.#memoryOps -= 1;
-      });
-  }
-
-  /**
-   * `memory.show` (KOBE-399, `show_memory_item`): a read, bound to the allowed call like
-   * `memory.read`; needs both `memory` and `semantic_memory`. `showMemory` answers only for an item
-   * this run was given or recalled, and writes nothing.
-   */
-  #onMemoryShow(frame: Extract<SandboxToServerFrame, { type: "memory.show" }>): void {
-    const answer = (reply: MemoryReply) =>
-      this.send({ v: 1, type: "memory.result", request_id: frame.request_id, ...reply });
-    const audit = (reason: MemoryRefusal | "capability_missing" | "input_mismatch") =>
-      this.#ctx.auditMemoryRefused(this.target, this.sandboxId, {
-        op: "read",
-        reason,
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-    const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
-      audit(reason);
-      answer({ ok: false, error: { code: "not_allowed", message } });
-    };
-    if (!this.hasCapability(CAPABILITY_MEMORY) || !this.hasCapability(CAPABILITY_SEMANTIC_MEMORY)) {
-      refuse("capability_missing", "This sandbox did not announce semantic memory.");
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.show");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "The run has ended.");
-      return;
-    }
-    const verdict = this.#allowedArtifacts.check(
-      frame.run_id,
-      frame.tool_call_id,
-      "show_memory_item",
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
-        verdict === "input_mismatch"
-          ? "The call differs from the one that was allowed."
-          : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#memoryOps >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      answer({
-        ok: false,
-        error: {
-          code: "storage_failed",
-          message: "Too many memory requests are waiting. Try again.",
-        },
-      });
-      return;
-    }
-    this.#memoryOps += 1;
-    void showMemory(this.#ctx.memory, {
-      teamId: this.target.teamId,
-      userId: this.target.userId,
-      runId: frame.run_id,
-      threadId: frame.thread_id,
-      input: frame.input,
-      recalled: (id) => this.#recalled.scopeOf(frame.run_id, id),
-      refused: audit,
-    })
-      .then(answer)
-      .finally(() => {
-        this.#memoryOps -= 1;
-      });
-  }
-
-  #onCommandResult(frame: CommandResultFrame): void {
-    const issued = this.#delivery.takeIssued(frame.command_id);
-    if (issued === "answered") return;
-    if (issued === undefined) {
-      this.#violate("unknown_command", "command.result");
-      return;
-    }
-    const outcome: CommandOutcome = frame.ok
-      ? frame.data === undefined
-        ? { ok: true }
-        : { ok: true, data: frame.data }
-      : { ok: false, error: frame.error };
-    if (issued.notebook !== undefined) {
-      // NB14: the outputs this execution sent are stored before its answer is recorded.
-      void this.#notebookOutputs
-        .drain(frame.command_id)
-        .finally(() => this.#delivery.settle(issued, outcome));
-      return;
-    }
-    this.#delivery.settle(issued, outcome);
-  }
-
-  /**
-   * The one answer to a `thread.compact` this connection delivered (KOBE-213), for the same thread.
-   * Anything else (an unknown or duplicate command id, another command's id, another thread) is a
-   * lease violation; a mismatched answer still settles its command, as failed, so nobody waits.
-   */
-  #onCompactResult(frame: Extract<SandboxToServerFrame, { type: "thread.compact_result" }>): void {
-    const issued = this.#delivery.takeIssued(frame.command_id);
-    if (issued === "answered") return;
-    const matches =
-      issued !== undefined &&
-      issued.kind === "row" &&
-      issued.commandKind === "thread.compact" &&
-      issued.threadId === frame.thread_id;
-    if (!matches) {
-      if (issued !== undefined) {
-        this.#delivery.settle(issued, {
-          ok: false,
-          error: { code: "malformed_result", message: "a compaction result for another command" },
-        });
-      }
-      this.#violate("unknown_run", "thread.compact_result");
-      return;
-    }
-    const { v: _v, type: _t, command_id: _c, thread_id: _th, ok, ...rest } = frame;
-    this.#delivery.settle(
-      issued,
-      ok ? { ok: true, data: rest } : { ok: false, error: (rest as { error: ErrorInfo }).error },
-    );
-  }
-
-  /** The one answer to a `thread.branch_summary` (KOBE-548): checked as `#onCompactResult`. */
-  #onBranchSummaryResult(
-    frame: Extract<SandboxToServerFrame, { type: "thread.branch_summary_result" }>,
-  ): void {
-    const issued = this.#delivery.takeIssued(frame.command_id);
-    if (issued === "answered") return;
-    const matches =
-      issued !== undefined &&
-      issued.kind === "row" &&
-      issued.commandKind === "thread.branch_summary" &&
-      issued.threadId === frame.thread_id;
-    if (!matches) {
-      if (issued !== undefined) {
-        this.#delivery.settle(issued, {
-          ok: false,
-          error: {
-            code: "malformed_result",
-            message: "a branch summary result for another command",
-          },
-        });
-      }
-      this.#violate("unknown_run", "thread.branch_summary_result");
-      return;
-    }
-    const { v: _v, type: _t, command_id: _c, thread_id: _th, ok, ...rest } = frame;
-    this.#delivery.settle(
-      issued,
-      ok ? { ok: true, data: rest } : { ok: false, error: (rest as { error: ErrorInfo }).error },
-    );
-  }
-
-  #onUiRequest(frame: Extract<SandboxToServerFrame, { type: "pi.ui_request" }>): void {
-    if (frame.run_id !== undefined) {
-      if (this.#checkRun(frame.run_id, frame.thread_id, "pi.ui_request") !== "ok") return;
-    } else if (!this.#checkThread(frame.thread_id, "pi.ui_request")) {
-      return;
-    }
-    const key = `${frame.thread_id}:${frame.request.id}`;
-    if (this.#uiSeen.has(key)) return; // re-sent after a reconnect (KOBE-23): answered once
-    remember(this.#uiSeen, key, UI_DEDUPE_MAX);
-    Promise.resolve()
-      .then(() =>
-        this.#ctx.ui.handle({
-          target: this.target,
-          threadId: frame.thread_id,
-          ...(frame.run_id === undefined ? {} : { runId: frame.run_id }),
-          request: frame.request,
-        }),
-      )
-      .then((response) => {
-        if (response)
-          this.send({ v: 1, type: "pi.ui_response", thread_id: frame.thread_id, response });
-      })
-      .catch((err: unknown) => this.log.warn({ err }, "ui request handling failed"));
   }
 
   #onPiExited(threadId: string, exitCode: number | null, signal: string | null): void {
-    if (!this.#checkThread(threadId, "pi.exited")) return;
+    if (!this.#checks.thread(threadId, "pi.exited")) return;
     this.log.warn({ thread_id: threadId, exit_code: exitCode, signal }, "Pi exited");
-    for (const [runId, lease] of this.#leases) {
+    for (const [runId, lease] of this.#leases.runs) {
       if (lease.threadId !== threadId || lease.ended) continue;
       this.endLease(runId);
       void this.interrupt(runId, "pi_exited");
     }
     this.#delivery.forgetSession(threadId);
-  }
-
-  /** Per-run token bucket for `policy.denied` events. */
-  #takeDeniedToken(runId: string): boolean {
-    const { deniedEventBurst, deniedEventsPerMinute } = this.#ctx.tuning;
-    const now = Date.now();
-    const b = this.#deniedBuckets.get(runId) ?? { tokens: deniedEventBurst, at: now };
-    b.tokens = Math.min(
-      deniedEventBurst,
-      b.tokens + ((now - b.at) / 60_000) * deniedEventsPerMinute,
-    );
-    b.at = now;
-    this.#deniedBuckets.set(runId, b);
-    if (b.tokens < 1) return false;
-    b.tokens -= 1;
-    return true;
   }
 
   /** A storage cap: the run fails (terminal event within the cap) and Pi is stopped. */
@@ -1543,34 +626,12 @@ export class SandboxConnection implements RegisteredConnection {
     this.log.warn({ run_id: runId, limit }, "sandbox storage limit reached; failing the run");
     this.#ctx.auditLimit(this.target, this.sandboxId, limit, runId);
     this.#delivery.stopRun(runId, threadId);
-    const code = limit === "thread_entries" ? "thread_too_large" : "run_too_large";
-    try {
-      const { ended } = await withAppendTx(this.#ctx.db, this.target.teamId, (tx) =>
-        endRunInTx(tx, this.target.teamId, runId, {
-          status: "failed",
-          error: { code, message: "The run produced more output than Kobe stores for one run." },
-        }),
-      );
-      if (ended)
-        this.#ctx.runEnded({ teamId: this.target.teamId, runId, threadId, status: "failed" });
-    } catch (err) {
-      this.log.error({ err, run_id: runId }, "could not fail an oversized run");
-    }
+    await failOversizedRun(this.#ctx, this.target, runId, threadId, limit, this.log);
   }
 
   /** Interrupts an active run (D14: never retried automatically). */
-  async interrupt(runId: string, cause: InterruptCause): Promise<void> {
-    try {
-      const { ended, threadId } = await withAppendTx(this.#ctx.db, this.target.teamId, (tx) =>
-        endRunInTx(tx, this.target.teamId, runId, { status: "interrupted" }, cause),
-      );
-      if (ended && threadId) {
-        this.#ctx.metrics.runsInterrupted += 1;
-        this.#ctx.runEnded({ teamId: this.target.teamId, runId, threadId, status: "interrupted" });
-      }
-    } catch (err) {
-      this.log.error({ err, run_id: runId }, "could not interrupt run");
-    }
+  interrupt(runId: string, cause: InterruptCause): Promise<void> {
+    return interruptRun(this.#ctx, this.target, runId, cause, this.log);
   }
 
   // ------------------------------------------------------------------ hello
@@ -1603,55 +664,46 @@ export class SandboxConnection implements RegisteredConnection {
       this.close("replaced", "a newer connection of this sandbox registered first");
       return;
     }
-    const { teamId } = this.target;
-    const offered = new Map(hello.runs.map((r) => [r.run_id, r]));
-    const { listed, lost, orphans } = await withTeam(ctx.db, teamId, async (tx) => {
-      const active = await activeLeasedRuns(tx, this.target, this.sandboxId);
-      // A compaction is never kept (KOBE-213): its `thread.compact` was issued on the old
-      // connection, so no answer can arrive on this one; it ends (failed) and the agent, not
-      // seeing it listed, aborts it. Its thread is released, its queue moves on.
-      const resumable = (r: (typeof active)[number]) =>
-        r.kind === "message" && offered.get(r.runId)?.thread_id === r.threadId;
-      const keep = active.filter(resumable);
-      const gone = active.filter((r) => !resumable(r));
-      return {
-        listed: keep,
-        lost: gone,
-        orphans: await orphanedDeliveries(tx, this.target, this.id),
-      };
-    });
-    for (const run of listed) {
-      this.#threads.add(run.threadId);
-      this.#leases.set(run.runId, {
-        threadId: run.threadId,
-        ended: false,
-        compaction: false, // never kept (above)
-        ingest: this.#newIngest(
-          run.runId,
-          run.threadId,
-          run.sandboxSeq,
-          runLatency(run.runId, true, false),
-        ),
-      });
-      // A resumed run keeps the trace context its agent got on the old connection (KOBE-274):
-      // on this replica its state (command spans, cap, seen-set) is still known; on another one
-      // it starts afresh, marked traced (harmless: same run, same team).
-      const knownTraced = this.#traces?.isTraced(run.runId) === true;
-      this.#traces?.track(run.runId, run.threadId, run.startedAt, this.#owner);
-      if (!knownTraced && this.#capabilities.has(CAPABILITY_TRACE_SPANS)) {
-        this.#traces?.traced(run.runId);
-      }
-    }
+    const { listed, lost, orphans } = await helloRuns(this.#port, hello);
+    for (const run of listed) this.#resume(run);
     // Runs the sandbox no longer has (Pi or agent restarted, volume lost): interrupted, never
     // resumed (D14). Runs it offers that we don't list are aborted by the agent.
     for (const run of lost) {
       // The agent may still send a frame of it (an abort in flight): dropped, not a violation.
-      this.#recentlyEnded.add(run.runId, run.threadId);
+      this.#leases.recentlyEnded.add(run.runId, run.threadId);
       await this.interrupt(run.runId, "not_resumed");
     }
-    await this.#reconcileOrphans(orphans, new Set(listed.map((r) => r.runId)));
+    await reconcileOrphans(ctx, this.target, orphans, new Set(listed.map((r) => r.runId)));
     if ((this.#state as State) === "closed") return;
     this.#state = "ready";
+    this.#ackHello(listed, lost.length);
+  }
+
+  /** A run listed in the hello is leased again here, from its durable cursor. */
+  #resume(run: LeasedRun): void {
+    this.#leases.add(run.runId, {
+      threadId: run.threadId,
+      ended: false,
+      compaction: false, // a compaction is never kept (helloRuns)
+      ingest: this.#newIngest(
+        run.runId,
+        run.threadId,
+        run.sandboxSeq,
+        runLatency(run.runId, true, false),
+      ),
+    });
+    // A resumed run keeps the trace context its agent got on the old connection (KOBE-274):
+    // on this replica its state (command spans, cap, seen-set) is still known; on another one
+    // it starts afresh, marked traced (harmless: same run, same team).
+    const knownTraced = this.#traces?.isTraced(run.runId) === true;
+    this.#traces?.track(run.runId, run.threadId, run.startedAt, this.#owner);
+    if (!knownTraced && this.#capabilities.has(CAPABILITY_TRACE_SPANS)) {
+      this.#traces?.traced(run.runId);
+    }
+  }
+
+  #ackHello(listed: readonly LeasedRun[], interrupted: number): void {
+    const ctx = this.#ctx;
     this.send({
       v: 1,
       type: "hello.ack",
@@ -1665,45 +717,12 @@ export class SandboxConnection implements RegisteredConnection {
       })),
     });
     this.log.info(
-      { sandbox_id: this.sandboxId, resumed: listed.length, interrupted: lost.length },
+      { sandbox_id: this.sandboxId, resumed: listed.length, interrupted },
       "sandbox connected",
     );
-    this.#recordHelloTiming(Date.now());
+    recordHelloTiming(ctx, this.target, Date.now(), this.log);
     this.#startTimers();
     this.#delivery.poke();
-  }
-
-  /** KOBE-525: wake start → this hello, when the hello follows a wake (never blocks the hello). */
-  #recordHelloTiming(helloMs: number): void {
-    if (this.target.evalThreadId !== undefined || !telemetryState().enabled) return;
-    wakeStartedAt(this.#ctx.db, this.target)
-      .then((startedAt) => {
-        const span = agentHelloSpan(startedAt, helloMs);
-        if (span) recordSpan(span.name, { startTime: span.startMs, endTime: span.endMs });
-      })
-      .catch((err: unknown) => this.log.debug({ err }, "hello timing unavailable"));
-  }
-
-  /** Commands delivered on an earlier connection never got their result (ids are per connection). */
-  async #reconcileOrphans(
-    orphans: readonly { id: string; kind: string; runId: string | null }[],
-    resumed: ReadonlySet<string>,
-  ): Promise<void> {
-    for (const o of orphans) {
-      const outcome: CommandOutcome =
-        o.kind === "run.start" && o.runId !== null && resumed.has(o.runId)
-          ? { ok: true, data: { resumed: true } }
-          : {
-              ok: false,
-              error: {
-                code: o.kind === "run.start" ? "sandbox_lost" : "connection_lost",
-                message: "the sandbox reconnected before answering",
-              },
-            };
-      await withTeam(this.#ctx.db, this.target.teamId, (tx) =>
-        completeCommand(tx, this.#ctx.bus, this.target.teamId, o.id, outcome),
-      );
-    }
   }
 
   // ------------------------------------------------------------------ timers and teardown
@@ -1738,64 +757,7 @@ export class SandboxConnection implements RegisteredConnection {
         .catch((err: unknown) => this.log.warn({ err }, "connection heartbeat write failed"));
     });
     this.#every(tuning.revalidateMs, () => this.revalidate());
-    this.#armExpiry();
-  }
-
-  /**
-   * The session token expires (15 min, KOBE-22). An agent with `session_renew` hands over its fresh
-   * token in band before then (KOBE-483) and the deadline moves; otherwise the sandbox reconnects
-   * with a fresh one and resumes its runs from their durable cursors.
-   */
-  #armExpiry(): void {
-    clearTimeout(this.#expiryTimer);
-    const expiresIn = this.#tokenExpiresAt - Date.now() + this.#ctx.tuning.tokenExpiryGraceMs;
-    this.#expiryTimer = setTimeout(
-      () => this.close("unauthorized", "session token expired"),
-      Math.max(0, expiresIn),
-    );
-    this.#expiryTimer.unref();
-  }
-
-  /**
-   * `session.renew` (KOBE-483): a fresh token for the same (sandbox, team, user, eval thread) moves
-   * the expiry; a token for any other identity closes the connection; an invalid or expired one is
-   * ignored (the old deadline stands). Never logs the token.
-   */
-  #onSessionRenew(token: string): void {
-    if (!this.#capabilities.has(CAPABILITY_SESSION_RENEW)) {
-      this.log.warn({ sandbox_id: this.sandboxId }, "session.renew without the capability ignored");
-      return;
-    }
-    let claims: ReturnType<SessionTokenVerifier>;
-    try {
-      claims = this.#ctx.verifyToken(token);
-    } catch {
-      this.#invalidRenewals += 1;
-      this.log.warn({ sandbox_id: this.sandboxId }, "session.renew with an invalid token ignored");
-      if (this.#invalidRenewals >= INVALID_RENEWALS_MAX)
-        this.close("unauthorized", "too many invalid session renewals");
-      return;
-    }
-    const sameIdentity =
-      claims.sub === this.sandboxId &&
-      claims.team_id === this.target.teamId &&
-      claims.user_id === this.target.userId &&
-      claims.eval_thread === this.target.evalThreadId;
-    if (!sameIdentity) {
-      this.log.warn(
-        { sandbox_id: this.sandboxId, security: true },
-        "session.renew for another identity",
-      );
-      this.close("unauthorized", "renewed token names another identity");
-      return;
-    }
-    const expiresAt = claims.exp * 1000;
-    if (expiresAt <= Date.now() || expiresAt <= this.#tokenExpiresAt) return;
-    this.#tokenExpiresAt = expiresAt;
-    this.#armExpiry();
-    // A renewal never outlives offboarding: re-check liveness, account and membership now.
-    this.revalidate();
-    this.log.debug({ sandbox_id: this.sandboxId, expires_at: expiresAt }, "session renewed");
+    this.#expiry.arm();
   }
 
   /** Re-checks the sandbox's liveness and its user's account and membership; closes if gone. */
@@ -1814,15 +776,14 @@ export class SandboxConnection implements RegisteredConnection {
     this.#state = "closed";
     this.#ctx.metrics.connectionsClosed += 1;
     for (const t of this.#timers) clearTimeout(t);
-    clearTimeout(this.#expiryTimer);
+    this.#expiry.clear();
     this.#timers = [];
     for (const abort of this.#policyPending.values()) abort.abort();
     this.#policyPending.clear();
     // Waiting Refreshes list now instead of at their timeout.
-    for (const id of this.#syncRequests) this.#syncAnswered(id, false);
-    this.#syncRequests.clear();
+    this.#syncAsks.close();
     this.#memoryAbort.abort();
-    for (const lease of this.#leases.values()) lease.ingest.close();
+    for (const lease of this.#leases.runs.values()) lease.ingest.close();
     this.#delivery.close();
     if (this.#registered) {
       // Runs stay leased: a reconnect within the grace period resumes them; the sweep

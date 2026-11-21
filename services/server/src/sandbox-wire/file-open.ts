@@ -1,15 +1,16 @@
 import { sql, type KobeDb } from "@kobe/db";
 import {
+  CAPABILITY_FILE_EDITS,
   workspaceToolPath,
   type FileOpenFrame,
   type FileOpenedPayload,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import type { Logger } from "pino";
-import type { AllowedVerdict } from "../artifacts/allowed.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { isInternalPath } from "../workspace-files/paths.js";
 import { currentEntry } from "../workspace-sync/store.js";
+import type { ToolFrameSpec } from "./gated-frame.js";
 import type { SandboxTarget } from "./types.js";
 
 /**
@@ -24,11 +25,6 @@ export interface FileOpenConnection {
   readonly target: SandboxTarget;
   readonly runMaxEvents: number;
   readonly log: Pick<Logger, "error" | "warn">;
-  readonly hasCapability: boolean;
-  /** `#checkToolRun` for this frame; "violation" was already answered and the frame dropped. */
-  readonly runCheck: () => "ok" | "ended" | "violation";
-  /** Takes the allowance (single use): a second frame for the call is "replayed". */
-  readonly verdict: () => AllowedVerdict | "replayed";
   send(frame: ServerToSandboxFrame): boolean;
 }
 
@@ -39,8 +35,9 @@ export type OpenOutcome =
 const refused = (code: string, message: string): OpenOutcome => ({ ok: false, code, message });
 const NOT_FOUND = refused("not_found", "There is no such file in the workspace.");
 
-export function onFileOpen(c: FileOpenConnection, frame: FileOpenFrame): void {
-  const answer = (outcome: OpenOutcome) =>
+/** The gate's spec for `file.open` (rides `file_edits`): the allowance is taken once. */
+export function fileOpenSpec(c: FileOpenConnection): ToolFrameSpec<FileOpenFrame, "consume"> {
+  const answerer = (frame: FileOpenFrame) => (outcome: OpenOutcome) =>
     c.send(
       outcome.ok
         ? {
@@ -59,42 +56,52 @@ export function onFileOpen(c: FileOpenConnection, frame: FileOpenFrame): void {
             error: { code: outcome.code, message: outcome.message },
           },
     );
-  if (!c.hasCapability) {
-    answer(refused("not_allowed", "This sandbox did not announce file edits."));
-    return;
-  }
-  // A skill eval's sandbox (KOBE-325) never reaches the member's workspace (also denied by policy).
-  if (c.target.evalThreadId !== undefined) {
-    answer(refused("not_allowed", "Skill evals never open the member's files."));
-    return;
-  }
-  const check = c.runCheck();
-  if (check === "violation") return;
-  if (check === "ended") {
-    answer(refused("not_allowed", "The run has ended, so the file was not opened."));
-    return;
-  }
-  const verdict = c.verdict();
-  if (verdict !== "ok") {
-    c.log.warn({ run_id: frame.run_id, verdict, security: true }, "file.open refused");
-    answer(
-      refused(
-        "not_allowed",
-        verdict === "input_mismatch"
-          ? "The file differs from the call that was allowed."
-          : verdict === "replayed"
-            ? "This tool call was already used to open a file."
-            : "This tool call was not allowed for this tool.",
-      ),
-    );
-    return;
-  }
-  void openFile(c.db, c.target, frame, c.runMaxEvents)
-    .catch((err: unknown): OpenOutcome => {
-      c.log.error({ err, run_id: frame.run_id }, "file.open failed");
-      return refused("storage_failed", "The file could not be opened. Try again.");
-    })
-    .then(answer);
+  return {
+    capabilities: [CAPABILITY_FILE_EDITS],
+    allowance: "consume",
+    // A skill eval's sandbox (KOBE-325) never reaches the member's workspace (also denied by policy).
+    beforeRun(frame) {
+      if (c.target.evalThreadId === undefined) return false;
+      answerer(frame)(refused("not_allowed", "Skill evals never open the member's files."));
+      return true;
+    },
+    refuse(frame, refusal) {
+      const answer = answerer(frame);
+      switch (refusal.stage) {
+        case "capability":
+          answer(refused("not_allowed", "This sandbox did not announce file edits."));
+          return;
+        case "ended":
+          answer(refused("not_allowed", "The run has ended, so the file was not opened."));
+          return;
+        case "verdict": {
+          const { verdict } = refusal;
+          c.log.warn({ run_id: frame.run_id, verdict, security: true }, "file.open refused");
+          answer(
+            refused(
+              "not_allowed",
+              verdict === "input_mismatch"
+                ? "The file differs from the call that was allowed."
+                : verdict === "replayed"
+                  ? "This tool call was already used to open a file."
+                  : "This tool call was not allowed for this tool.",
+            ),
+          );
+          return;
+        }
+        case "busy":
+          return; // no in-flight cap for this kind
+      }
+    },
+    act(frame) {
+      void openFile(c.db, c.target, frame, c.runMaxEvents)
+        .catch((err: unknown): OpenOutcome => {
+          c.log.error({ err, run_id: frame.run_id }, "file.open failed");
+          return refused("storage_failed", "The file could not be opened. Try again.");
+        })
+        .then(answerer(frame));
+    },
+  };
 }
 
 /** Checks the path against the run owner's synced workspace and records `file.opened`. */
